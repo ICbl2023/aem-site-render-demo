@@ -1,0 +1,65 @@
+# Production AEM — service Node + disque persistant (payant).
+# Un seul service sert les pages ET l’API (même origine) : /ants.html, /permis.html, /admin.html.
+# Les fronts Netlify séparés ne suffisent pas : brouillons, uploads, envoi et admin exigent ce backend.
+#
+# À créer dans le tableau de bord Render (Blueprint ou Web Service) depuis un dépôt privé.
+# Secrets à saisir manuellement (sync: false) — ne jamais les committer.
+services:
+  - type: web
+    name: aem-questionnaires
+    runtime: node
+    plan: starter
+    region: frankfurt
+    numInstances: 1
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/config
+    disk:
+      name: aem-data
+      mountPath: /var/data
+      sizeGB: 5
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: HOST
+        value: 0.0.0.0
+      - key: TRUST_PROXY
+        value: "1"
+      # RENDER_EXTERNAL_URL est fourni par Render ; server-config.js l’utilise comme AEM_ORIGIN si AEM_ORIGIN est vide.
+      - key: AEM_RECEIPT_DIR
+        value: /var/data/aem-receipts
+      - key: AEM_DATA_DIR
+        value: /var/data/aem-dossiers
+      - key: AEM_DRAFT_DIR
+        value: /var/data/aem-brouillons
+      - key: AEM_DRAFTS
+        value: "1"
+      - key: AEM_MAIL_ATTACHMENTS
+        value: "0"
+      - key: AEM_CANDIDATE_MAIL
+        value: "1"
+      - key: AEM_RETENTION_DAYS
+        value: "365"
+      - key: SMTP_PORT
+        value: "587"
+      # Format exact attendu par admin-auth.js : identifiant:motdepasse:rôle
+      # Valeur à saisir dans le dashboard : demo:demo:responsable
+      - key: AEM_ADMIN_ACCOUNTS
+        sync: false
+      # Laisser vide en production réelle (sinon l’écran de connexion est prérempli).
+      - key: AEM_ADMIN_PREFILL
+        sync: false
+      - key: AEM_FROM
+        sync: false
+      - key: AEM_RECIPIENT
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: AEM_ADMIN_URL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false

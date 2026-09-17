@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#F1F4F8">
+<title>Dossiers AEM</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%278%27 fill=%27%230B1A33%27/%3E%3Cpath d=%27M6 22v-5l3-1 3-5h9l4 5 3 1v5z%27 fill=%27%23FF7900%27/%3E%3Ccircle cx=%2711%27 cy=%2723%27 r=%273%27 fill=%27%23fff%27/%3E%3Ccircle cx=%2722%27 cy=%2723%27 r=%273%27 fill=%27%23fff%27/%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css?v=20260916b">
+<link rel="stylesheet" href="admin.css?v=20260916b">
+</head>
+<body>
+<a class="skip-link" href="#admin-app">Aller au contenu</a>
+<main class="admin-shell" id="admin-app">
+<section class="admin-login" id="admin-login">
+<img class="brand-logo" src="cropped-logo_auto-ecole-meyzieu.png" alt="AEM">
+<h1>Dossiers AEM</h1>
+<p class="lead">Espace réservé à l’équipe de l’Auto-école Majolane : réception et suivi des dossiers ANTS et Permis.</p>
+<form id="login-form">
+<label class="field-label" for="admin-user">Identifiant</label>
+<input class="text-input" id="admin-user" type="text" autocomplete="username" autocapitalize="off" spellcheck="false" maxlength="64" required>
+<label class="field-label" for="admin-password">Mot de passe</label>
+<input class="text-input" id="admin-password" type="password" autocomplete="current-password" required>
+<p class="field-error" id="login-error" hidden role="alert"></p>
+<p class="validation-hint" id="login-prefill" hidden>Phase de test : identifiants préremplis, appuyez sur « Se connecter ».</p>
+<button class="next-button" type="submit">Se connecter</button>
+</form>
+</section>
+<section class="admin-app" id="admin-panel" hidden>
+<div class="admin-topbar">
+<span class="brand" title="Espace AEM"><img class="brand-logo" src="cropped-logo_auto-ecole-meyzieu.png" alt="AEM"><span><strong>Auto-école<br>Majolane</strong><small>Dossiers AEM</small></span></span>
+<div class="admin-topbar-right"><span class="admin-user" id="admin-user-label"></span><button class="secondary-button" type="button" id="logout-button">Déconnexion</button></div>
+</div>
+<header class="admin-header">
+<div>
+<p class="eyebrow" id="admin-eyebrow">File de travail</p>
+<h1 id="admin-title">Dossiers</h1>
+<p class="validation-hint" id="admin-summary"></p>
+</div>
+<details class="admin-settings" id="service-settings" hidden>
+<summary>Réglages du service</summary>
+<p id="service-status">Chargement…</p>
+</details>
+</header>
+<details class="admin-guide" id="admin-guide">
+<summary>Comment traiter un dossier (guide court)</summary>
+<ol>
+<li>Un candidat envoie son questionnaire → vous êtes notifiés par e-mail.</li>
+<li>Ouvrez <strong>À traiter</strong> (file par défaut) et sélectionnez le dossier.</li>
+<li>Vérifiez les pièces, appelez ou demandez une pièce manquante si besoin.</li>
+<li>Passez le statut en <strong>En cours</strong>, puis <strong>Prêt</strong>, puis <strong>Classé</strong>.</li>
+</ol>
+</details>
+<div class="admin-queue admin-queue-primary" id="admin-queue" hidden role="group" aria-label="Files principales">
+<button class="queue-card" type="button" data-queue="received"><strong id="stat-received">0</strong><span>À traiter</span><i class="queue-badge" id="badge-received" hidden>nouveau</i></button>
+<button class="queue-card" type="button" data-queue="toCollect"><strong id="stat-collect">0</strong><span>Pièces à récupérer</span></button>
+<button class="queue-card" type="button" data-queue="in_progress"><strong id="stat-progress">0</strong><span>En cours</span></button>
+</div>
+<details class="admin-queue-more" id="admin-queue-more" hidden>
+<summary>Autres files</summary>
+<div class="admin-queue admin-queue-secondary" role="group" aria-label="Files complémentaires">
+<button class="queue-card" type="button" data-queue="missing_pieces"><strong id="stat-missing">0</strong><span>Pièces manquantes</span></button>
+<button class="queue-card queue-warn" type="button" data-queue="stale"><strong id="stat-stale">0</strong><span>Relancés sans réponse (10 j+)</span></button>
+<button class="queue-card" type="button" data-queue="unassigned"><strong id="stat-unassigned">0</strong><span>Non attribués</span></button>
+</div>
+</details>
+<div class="admin-toolbar">
+<input class="text-input admin-search" id="search-input" type="search" placeholder="Rechercher nom, e-mail, référence…" aria-label="Rechercher">
+<button class="edit-button" type="button" id="refresh-button">Actualiser</button>
+<select class="text-input admin-filter" id="workflow-filter" aria-label="Filtrer par démarche">
+<option value="">Toutes les démarches</option>
+<option value="ants">ANTS</option>
+<option value="permis">Permis</option>
+</select>
+<select class="text-input admin-filter" id="status-filter" aria-label="Filtrer par statut">
+<option value="">En cours de traitement</option>
+</select>
+</div>
+<p class="validation-hint admin-filter-note" id="filter-note" hidden></p>
+<div class="admin-layout" id="admin-layout">
+<section class="admin-list-panel" aria-label="Liste des dossiers">
+<ul class="admin-list" id="dossier-list"></ul>
+<p class="validation-hint" id="list-empty" hidden>Aucun dossier ne correspond à votre recherche.</p>
+</section>
+<section class="admin-detail-panel" id="detail-panel" hidden aria-label="Dossier sélectionné">
+<button class="secondary-button admin-back" type="button" id="detail-back" hidden>Retour à la liste</button>
+<p class="validation-hint" id="detail-empty">Sélectionnez un dossier pour afficher le détail.</p>
+<p class="field-error" id="detail-error" role="alert" hidden></p>
+<article id="detail-content" hidden></article>
+</section>
+</div>
+</section>
+</main>
+<script type="module" src="admin.js?v=20260916b"></script>
+</body>
+</html>

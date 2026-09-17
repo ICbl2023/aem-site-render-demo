@@ -1,0 +1,27 @@
+node_modules/
+.env
+test-results/
+backup/
+.runtime/
+.data/
+.data-brouillons/
+
+.browser-cache/
+public/
+livraison/
+Questionnaire pour Luc/
+captures-demo/
+docs/audit-2026-09-12/audit-confirmes.json
+.DS_Store
+*.log
+.netlify/
+Capture AEM.png
+Capture d'écran*.png
+*.xmind
+Questionnaire pour Luc.zip
+.serena/
+.work/
+.data-demo/
+.data-questionnaires-demo/
+.receipts-questionnaires-demo/
+questionnaires-autonomes/

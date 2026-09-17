@@ -1,0 +1,38 @@
+{
+  "name": "aem-questionnaires",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.js",
+    "test": "node --test tests/*.test.js",
+    "test:browser": "node tests/browser.js",
+    "build:netlify-sites": "node scripts/build-netlify-sites.js",
+    "build:preview": "node scripts/build-public.js",
+    "deploy:netlify": "node scripts/deploy-netlify.js",
+    "check:mail": "node --env-file-if-exists=.env scripts/check-mail.js",
+    "test:mail": "node --env-file-if-exists=.env scripts/test-mail.js",
+    "test:compatibility": "node tests/compatibility.js",
+    "demo": "node scripts/start-demo.js",
+    "test:demo": "node tests/demo-browser.js",
+    "start:questionnaires": "node --env-file-if-exists=.env questionnaire-server.js",
+    "demo:questionnaires": "node --env-file-if-exists=.env questionnaire-server.js --demo",
+    "build:questionnaires": "node scripts/build-questionnaires.js",
+    "test:drafts": "node tests/drafts-browser.js --chrome-only",
+    "test:drafts:webkit": "node tests/drafts-browser.js --webkit-only",
+    "test:cross-device": "node tests/cross-device-check.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.125.0",
+    "busboy": "^1.6.0",
+    "nodemailer": "10.0.1"
+  },
+  "devDependencies": {
+    "mailparser": "^3.7.0",
+    "playwright": "^1.55.0",
+    "smtp-server": "^3.15.0"
+  }
+}

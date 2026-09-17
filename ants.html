@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="fr" data-workflow="ants">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F1F4F8">
+<meta name="robots" content="noindex, nofollow">
+<title>AEM — Dossier ANTS</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%278%27 fill=%27%230B1A33%27/%3E%3Cpath d=%27M6 22v-5l3-1 3-5h9l4 5 3 1v5z%27 fill=%27%23FF7900%27/%3E%3Ccircle cx=%2711%27 cy=%2723%27 r=%273%27 fill=%27%23fff%27/%3E%3Ccircle cx=%2722%27 cy=%2723%27 r=%273%27 fill=%27%23fff%27/%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css?v=20260916-car-progress">
+</head>
+<body>
+<a class="skip-link" href="#question-card">Aller au questionnaire</a>
+<main class="app-shell">
+<header class="site-header">
+<a class="brand" href="#question-card" aria-label="Auto-école Majolane — questionnaire">
+<img class="brand-logo" src="cropped-logo_auto-ecole-meyzieu.png" alt="AEM">
+<span><strong>Auto-école<br>Majolane</strong><small>Votre réussite, notre route</small></span>
+</a>
+<span class="secure-label"><svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8.3-8 9-4.5-.7-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg> Dossier ANTS</span>
+</header>
+<section class="journey" aria-labelledby="journey-title">
+<div class="journey-topline"><p id="journey-title">ANTS</p><p id="progress-label" aria-live="polite"></p></div>
+<div class="road" id="road" role="progressbar" aria-label="Progression du questionnaire" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+<div class="progress-track"><span id="progress-bar"></span></div>
+<svg class="progress-car" id="progress-car" viewBox="0 0 48 28" aria-hidden="true"><path d="M4 19v-8l6-2 5-7h17l7 8 6 3v8H3z" fill="currentColor"/><path d="m17 5-4 5h11V5zm10 0v5h9l-5-5z" fill="#eaf5fc"/><circle cx="12" cy="21" r="5" fill="#183147"/><circle cx="37" cy="21" r="5" fill="#183147"/><circle cx="12" cy="21" r="2" fill="white"/><circle cx="37" cy="21" r="2" fill="white"/></svg>
+</div>
+<p id="progress-group" class="progress-group"></p>
+</section>
+<section class="question-card" id="question-card" aria-busy="false">
+<div class="step-content"><h1>Ouverture du questionnaire</h1><p class="lead">Si le questionnaire ne s’affiche pas, ouvrez son lien dans Safari, Chrome ou Edge à jour, plutôt que dans l’aperçu d’une pièce jointe. JavaScript doit être activé.</p></div>
+</section>
+<p class="privacy-note">Vos réponses et documents sont destinés à l’équipe AEM pour cette démarche. Un brouillon est conservé sur cet appareil et dans ce navigateur pendant 7 jours après la dernière sauvegarde réussie. Si vous quittez puis revenez, vous pourrez reprendre ou recommencer. Après un envoi confirmé, le brouillon est effacé et le dossier est conservé par AEM le temps du traitement. <a href="./confidentialite.html" target="_blank" rel="noopener">Politique de confidentialité</a> · <a href="./mentions-legales.html" target="_blank" rel="noopener">Mentions légales</a>.</p>
+<p class="contact-line"><span>Une question ou une situation particulière ? <a href="tel:+33478317985">04 78 31 79 85</a></span><span><a href="mailto:aem69330@gmail.com">aem69330@gmail.com</a></span></p>
+<noscript><p>Activez JavaScript pour utiliser le questionnaire, ou contactez directement AEM.</p></noscript>
+</main>
+<script type="module" src="app.js?v=20260916b"></script>
+<script type="module" src="scene.js?v=20260916b"></script>
+</body>
+</html>

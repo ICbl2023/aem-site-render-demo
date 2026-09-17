@@ -1,0 +1,34 @@
+# Démo gratuite Render (Blueprint) : serveur complet, s'endort après 15 min sans visite, disque éphémère
+# (les dossiers reçus disparaissent à chaque redéploiement). Pour la production : render-production.yaml.
+# L'origine publique vient de RENDER_EXTERNAL_URL (lue par server-config.js) ; AEM_ADMIN_ACCOUNTS se saisit dans le tableau de bord Render.
+services:
+  - type: web
+    name: aem-site-demo
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/config
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: HOST
+        value: 0.0.0.0
+      - key: TRUST_PROXY
+        value: "1"
+      - key: AEM_DATA_DIR
+        value: .data
+      - key: AEM_RECEIPT_DIR
+        value: .data/receipts
+      # Disque éphémère en plan gratuit : les brouillons disparaissent à chaque redéploiement, comme les dossiers.
+      - key: AEM_DRAFT_DIR
+        value: .data/brouillons
+      - key: AEM_CANDIDATE_MAIL
+        value: "0"
+      - key: AEM_RETENTION_DAYS
+        value: "30"
+      - key: AEM_ADMIN_ACCOUNTS
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
