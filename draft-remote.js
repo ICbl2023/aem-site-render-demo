@@ -39,13 +39,21 @@ async function sameContent(entry,file){
 
 // Le jeton arrive dans le fragment (#r=…) et non dans la query : il n'est ainsi ni journalisé par le serveur,
 // ni transmis dans l'en-tête Referer. Il est retiré après vérification et mémorisation du lien.
+// sessionStorage garde une copie immédiate : un clic sur une ancre (#question-card) avant le module
+// ne doit pas faire perdre le lien de reprise (surtout Safari / ouverture depuis Mail).
+const PENDING_HASH="aem-draft-hash";
 function tokenFromUrl(){
  const match=/[#&]r=([A-Za-z0-9._-]+)/.exec(location.hash||"");
- return match?.[1]||"";
+ if(match?.[1]){
+  try{sessionStorage.setItem(PENDING_HASH,match[1]);}catch{/* navigation privée */}
+  return match[1];
+ }
+ try{return sessionStorage.getItem(PENDING_HASH)||"";}catch{return "";}
 }
 function clearUrlToken(){
  const rest=(location.hash||"").replace(/[#&]r=[A-Za-z0-9._-]+/,"").replace(/^&/,"#");
  try{history.replaceState(null,"",location.pathname+location.search+(rest.length>1?rest:""));}catch{/* barre d'adresse inchangée : sans conséquence */}
+ try{sessionStorage.removeItem(PENDING_HASH);}catch{/* */}
 }
 
 export function createRemoteDraftStore(workflow,{scope=new URL(".",location.href).pathname,fetcher=globalThis.fetch?.bind(globalThis),local=createDraftStore(workflow,{scope}),notify=()=>{}}={}){
