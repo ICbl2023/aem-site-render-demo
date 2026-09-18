@@ -1,6 +1,10 @@
-# Démo gratuite Render (Blueprint) : serveur complet, s'endort après 15 min sans visite, disque éphémère
-# (les dossiers reçus disparaissent à chaque redéploiement). Pour la production : render-production.yaml.
-# L'origine publique vient de RENDER_EXTERNAL_URL (lue par server-config.js) ; AEM_ADMIN_ACCOUNTS se saisit dans le tableau de bord Render.
+# Démo gratuite Render (Blueprint) : serveur complet, s'endort après ~15 min sans visite,
+# disque éphémère (dossiers et brouillons disparaissent à chaque redéploiement / nouvelle instance).
+# Pour la production payante + disque : render-production.yaml (ne PAS activer sans décision humaine).
+# Origine publique : RENDER_EXTERNAL_URL (lue par server-config.js si AEM_ORIGIN est vide).
+# Après création du service, saisir dans le dashboard :
+#   AEM_ADMIN_ACCOUNTS=demo:demo:responsable
+# Laisser AEM_ADMIN_PREFILL vide (sinon le mot de passe est exposé via /api/admin/session).
 services:
   - type: web
     name: aem-site-demo
@@ -21,13 +25,17 @@ services:
         value: .data
       - key: AEM_RECEIPT_DIR
         value: .data/receipts
-      # Disque éphémère en plan gratuit : les brouillons disparaissent à chaque redéploiement, comme les dossiers.
       - key: AEM_DRAFT_DIR
         value: .data/brouillons
+      - key: AEM_DRAFTS
+        value: "1"
+      - key: AEM_MAIL_ATTACHMENTS
+        value: "0"
       - key: AEM_CANDIDATE_MAIL
         value: "0"
       - key: AEM_RETENTION_DAYS
         value: "30"
+      # Saisir manuellement : demo:demo:responsable
       - key: AEM_ADMIN_ACCOUNTS
         sync: false
       - key: ANTHROPIC_API_KEY
