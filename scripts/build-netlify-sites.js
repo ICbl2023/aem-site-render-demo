@@ -12,7 +12,7 @@ const sharedFonts=[
  "styles.css","mentions-legales.html","confidentialite.html"
 ];
 const questionnaireShared=[
- ...sharedFonts,"app.js","logic.js","drafts.js","draft-remote.js","draft-ui.js","icons.js","scene.js"
+ ...sharedFonts,"app.js","logic.js","drafts.js","draft-remote.js","draft-boot.js","draft-ui.js","icons.js","scene.js"
 ];
 const headers=`/*
   X-Frame-Options: DENY

@@ -11,6 +11,7 @@ import {config as defaultConfig} from "./server-config.js";
 import {cleanAnswers,answerErrors,documentsFor,auditText,subjectFor,acceptedExtensions,missingRequiredDocuments,deferredDocuments,isDeferred,workflows} from "./logic.js";
 import {createStorage,dossierStatuses,historyActions,isSubmissionId,STALE_AFTER_DAYS} from "./storage.js";
 import {createDraftStorage,parseDraftToken,DRAFT_ANSWER_BYTES} from "./draft-storage.js";
+import {createBlobStoreFromConfig} from "./blob-store.js";
 import {DRAFT_DAYS} from "./drafts.js";
 import {createAdminAuth} from "./admin-auth.js";
 import {createChat} from "./chat-server.js";
@@ -18,7 +19,7 @@ const root=path.dirname(fileURLToPath(import.meta.url));
 const staticFiles=new Map([
  ["","portail.html"],["ants.html","ants.html"],["permis.html","permis.html"],["portail.html","portail.html"],
  ["formations.html","formations.html"],["tarifs.html","tarifs.html"],["demarches.html","demarches.html"],["inscription.html","inscription.html"],["apres-examen.html","apres-examen.html"],["rendez-vous.html","rendez-vous.html"],["contact.html","contact.html"],["mentions-legales.html","mentions-legales.html"],["confidentialite.html","confidentialite.html"],["chat.js","chat.js"],["assist.js","assist.js"],["assist-extract.js","assist-extract.js"],["guide.js","guide.js"],
- ["drafts.js","drafts.js"],["draft-ui.js","draft-ui.js"],["draft-remote.js","draft-remote.js"],["styles.css","styles.css"],["app.js","app.js"],["logic.js","logic.js"],["voice.js","voice.js"],["icons.js","icons.js"],["scene.js","scene.js"],["fonts/overpass-var.woff2","fonts/overpass-var.woff2"],["fonts/atkinson-var.woff2","fonts/atkinson-var.woff2"],["admin.html","admin.html"],["admin.css","admin.css"],["admin.js","admin.js"],
+ ["drafts.js","drafts.js"],["draft-ui.js","draft-ui.js"],["draft-remote.js","draft-remote.js"],["draft-boot.js","draft-boot.js"],["styles.css","styles.css"],["app.js","app.js"],["logic.js","logic.js"],["voice.js","voice.js"],["icons.js","icons.js"],["scene.js","scene.js"],["fonts/overpass-var.woff2","fonts/overpass-var.woff2"],["fonts/atkinson-var.woff2","fonts/atkinson-var.woff2"],["admin.html","admin.html"],["admin.css","admin.css"],["admin.js","admin.js"],
  ["cropped-logo_auto-ecole-meyzieu.png","cropped-logo_auto-ecole-meyzieu.png"]
 ]);
 const mime={".html":"text/html; charset=utf-8",".js":"text/javascript; charset=utf-8",".css":"text/css; charset=utf-8",".png":"image/png",".jpg":"image/jpeg",".jpeg":"image/jpeg",".webp":"image/webp",".woff2":"font/woff2",".mp3":"audio/mpeg",".ogg":"audio/ogg",".m4a":"audio/mp4",".json":"application/json; charset=utf-8"};
@@ -244,9 +245,11 @@ export function createApp(options={}){
  const config={...defaultConfig,...options.config};
  const publicFiles=config.standalone?new Map([...questionnairePublicFiles.map(name=>[name,name]),["","portail.html"],["portail.html","portail.html"]]):staticFiles;
  const demo=options.demo===true?createDemo(config.basePath):null;
- const storage=options.storage || createStorage(path.resolve(root,config.dataDir));
+ // Blobs : null/omit = fichiers legacy à côté des meta ; memory/r2/local via options.blobs (tests ou prod R2).
+ const blobs=options.blobs||null;
+ const storage=options.storage || createStorage(path.resolve(root,config.dataDir),blobs?{blobs}:{});
  const draftsEnabled=Boolean(config.drafts && config.draftDir);
- const draftStorage=draftsEnabled?(options.draftStorage || createDraftStorage(path.resolve(root,config.draftDir))):null;
+ const draftStorage=draftsEnabled?(options.draftStorage || createDraftStorage(path.resolve(root,config.draftDir),blobs?{blobs}:{})):null;
  const auth=createAdminAuth(config);
  const chat=createChat({config,dataDir:path.resolve(root,config.dataDir)});
  const mailEnabled=Boolean(config.smtpHost && config.from && config.recipient);
@@ -457,7 +460,7 @@ export function createApp(options={}){
  const session=requireAdmin(req,res);if(!session)return;
  if(route==="api/admin/status" && req.method==="GET"){
  if(session.role!=="responsable")return json(res,403,{error:"Réservé au compte responsable."});
- return json(res,200,{mail:Boolean(transport),candidateMail:Boolean(transport && config.candidateMail),ai:Boolean(config.aiEnabled),chat:await chat.summary(),retentionDays:config.retentionDays,accounts:auth.accountCount,user:session.user,dataDir:config.dataDir && config.dataDir!==".data"?"configuré":"par défaut"});
+ return json(res,200,{mail:Boolean(transport),candidateMail:Boolean(transport && config.candidateMail),ai:Boolean(config.aiEnabled),chat:await chat.summary(),retentionDays:config.retentionDays,accounts:auth.accountCount,user:session.user,dataDir:config.dataDir && config.dataDir!==".data"?"configuré":"par défaut",blobDriver:blobs?.driver||storage.fileStore?.driver||"legacy-fs"});
  }
  if(route==="api/admin/stats" && req.method==="GET"){
  const items=await storage.list();
@@ -717,5 +720,7 @@ export function createApp(options={}){
 if(process.argv[1] && path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  // Filet supplémentaire en production seulement (les tests gardent le comportement par défaut de Node pour repérer les bugs).
  process.on("unhandledRejection",e=>console.error("Rejet non géré",e));
- createApp().listen(defaultConfig.port,defaultConfig.host,()=>console.log("Questionnaire AEM : http://"+defaultConfig.host+":"+defaultConfig.port+defaultConfig.basePath+"/"));
+ const blobs=await createBlobStoreFromConfig(defaultConfig);
+ if(blobs?.driver==="r2")console.log("Stockage fichiers : Cloudflare R2 (bucket privé).");
+ createApp({blobs}).listen(defaultConfig.port,defaultConfig.host,()=>console.log("Questionnaire AEM : http://"+defaultConfig.host+":"+defaultConfig.port+defaultConfig.basePath+"/"));
 }

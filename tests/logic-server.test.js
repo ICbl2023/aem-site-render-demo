@@ -6,16 +6,25 @@ import {deferredDocuments} from "../logic.js";
 import {createStorage} from "../storage.js";
 import {candidate,png,pdf,heic,startHarness,form,send,attachmentsFor} from "./helpers.js";
 const now=new Date("2026-09-08T12:00:00Z");
-for(const nationality of ["francaise","etrangere"])for(const age of [15,16,17,18,21,25,26]){
+for(const nationality of ["francaise","etrangere"])for(const age of [15,16,17,18,21,24,25,26]){
  test(age+" ans "+nationality,()=>{
  const a={...candidate,nationality,birthDate:(2026-age)+"-09-08"};
  assert.equal(ageFromDate(a.birthDate,now),age);
  const expected=age===15?["assr_15"]:age<=21?["assr_2"]:[];
  if(nationality==="francaise"&&age===17)expected.push("recensement");
- if(nationality==="francaise"&&age>=18&&age<=25)expected.push("jdc");
+ if(nationality==="francaise"&&age>=17&&age<25)expected.push("jdc");
  assert.deepEqual(ageDocuments(a,now).map(d=>d.key),expected);
  });
 }
+test("JDC : bornes françaises 16 / 17 / 24 / 25 (ANTS et Permis)",()=>{
+ for(const workflow of ["ants","permis"]){
+ for(const [age,want] of [[16,false],[17,true],[18,true],[24,true],[25,false],[26,false]]){
+  const a={...candidate,workflow,nationality:"francaise",birthDate:(2026-age)+"-09-08"};
+  assert.equal(documentsFor(a,now).some(d=>d.key==="jdc"),want,"FR "+age+" ans → JDC="+want);
+  assert.equal(documentsFor({...a,nationality:"etrangere"},now).some(d=>d.key==="jdc"),false,"étranger "+age+" ans → pas de JDC");
+ }
+ }
+});
 test("Dates impossibles, futures, bissextiles et anniversaires",()=>{
  for(const d of ["","nonsense","2025-02-29","2026-13-01","2026-04-31","0000-01-01"])assert.equal(dateParts(d),null);
  assert.equal(ageFromDate("2027-01-01",now),null);assert.equal(ageFromDate("2008-09-09",now),17);
@@ -161,11 +170,11 @@ test("Espace admin : connexion, liste et mise à jour de statut",async()=>{
 
 
 
-test("Dates documentaires et mois du justificatif de domicile",()=>{
+test("Dates documentaires et justificatif de domicile (facture / quittance / avis)",()=>{
  for(const flow of ["ants","permis"]){
  const a={...candidate,workflow:flow};
  assert.equal(stepsFor(a).find(s=>s.id==="identity").fields.find(f=>f.key==="birthDate").required,true);
- for(const f of stepsFor(a).flatMap(s=>s.fields).filter(f=>["date","month"].includes(f.type) && f.key!=="homeDate")){
+ for(const f of stepsFor(a).flatMap(s=>s.fields).filter(f=>["date","month","year"].includes(f.type) && f.key!=="homeDate")){
  assert.equal(f.required,false);assert.equal(fieldError(f,"",now),"");assert.ok(!f.label.includes("facultatif"));
  }
  }
@@ -173,17 +182,30 @@ test("Dates documentaires et mois du justificatif de domicile",()=>{
  assert.equal(identity.label,"Date d’expiration");
  assert.ok(fieldError(identity,"2026-02-31",now));
  assert.equal(fieldError(identity,"2020-01-01",now),"");
- for(const homeProof of ["facture","loyer","impot"]){
- const a={...candidate,home:"own",homeProof};
+ for(const homeProof of ["facture","loyer"]){
+ const a={...candidate,home:"own",homeProof,homeDate:"2026-08"};
  const date=stepsFor(a).find(s=>s.id==="homeFiles").fields.find(f=>f.key==="homeDate");
  assert.equal(date.type,"month");assert.equal(date.label,"Mois et année du document");assert.equal(date.required,true);assert.equal(date.maxMonths,6);
  assert.ok(fieldError(date,"2026-08-01",now));assert.ok(fieldError(date,"2026-13",now));
  assert.ok(fieldError(date,"2027-01",now));assert.equal(fieldError(date,"2026-08",now),"");
  assert.ok(fieldError(date,"2025-12",now),"document trop ancien (> 6 mois)");
+ assert.ok(fieldError(date,"2025",now),"année seule refusée pour facture/quittance");
  assert.equal(cleanAnswers(a).homeDate,"2026-08");
  assert.ok(auditText(a,[],now).includes("Mois et année du document : 08/2026"));
  assert.ok(stepsFor(a).find(s=>s.id==="homeFiles").fields.find(f=>f.key==="homeProof").options.find(o=>o[0]===homeProof)[1].includes("moins de 6 mois"));
  }
+ const tax={...candidate,home:"own",homeProof:"impot",homeDate:"2025"};
+ const year=stepsFor(tax).find(s=>s.id==="homeFiles").fields.find(f=>f.key==="homeDate");
+ assert.equal(year.type,"year");assert.equal(year.label,"Année du document");assert.equal(year.required,true);assert.equal(year.maxMonths,undefined);
+ assert.equal(fieldError(year,"2025",now),"");
+ assert.ok(fieldError(year,"2025-08",now),"mois+année refusés pour l’avis d’imposition");
+ assert.ok(fieldError(year,"2027",now),"année future refusée");
+ assert.ok(fieldError(year,"",now));
+ assert.equal(cleanAnswers(tax).homeDate,"2025");
+ assert.ok(auditText(tax,[],now).includes("Année du document : 2025"));
+ assert.ok(auditText(tax,[],now).includes("Dernier avis d’imposition"));
+ assert.equal(stepsFor(tax).find(s=>s.id==="homeFiles").fields.find(f=>f.key==="homeProof").options.find(o=>o[0]==="impot")[1],"Dernier avis d’imposition");
+ assert.ok(!stepsFor(tax).find(s=>s.id==="homeFiles").fields.find(f=>f.key==="homeProof").options.find(o=>o[0]==="impot")[1].includes("moins de 6 mois"));
  assert.equal(monthAge("2026-08",now),"Ancienneté en mois calendaires : 1 mois.");
  assert.equal(monthAge("2026-09",now),"Document du mois en cours");
  assert.equal(documentAge("2026-08-01",now),"Ancienneté : 1 mois et 7 jours");

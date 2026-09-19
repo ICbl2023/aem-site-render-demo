@@ -31,7 +31,7 @@ test("Rôles : lecture consulte seulement, traitement agit, responsable voit l�
 });
 
 test("Suivi par : attribution « moi » ou nom, retrait, historique et liste",async()=>{
- const h=await startHarness({adminPassword:"",adminAccounts:ACCOUNTS});
+ const h=await startHarness({adminPassword:"",adminAccounts:ACCOUNTS,retentionDays:365});
  try{
  const id=await submitted(h);
  const marie=await login(h,"marie","trait-2");

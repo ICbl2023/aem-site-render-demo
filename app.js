@@ -1,4 +1,4 @@
-import {newSubmissionId,workflows,limits,accept,acceptedExtensions,stepsFor,documentsFor,cleanAnswers,answerErrors,fieldError,ageFromDate,expiryStatus,documentAge,monthAge,displayValue,missingRequiredDocuments,deferredDocuments,isDeferred,isMinor,maskDate,dateFromInput,dateInputValue} from "./logic.js";
+import {newSubmissionId,workflows,limits,accept,acceptedExtensions,stepsFor,documentsFor,cleanAnswers,answerErrors,fieldError,ageFromDate,expiryStatus,documentAge,monthAge,yearAge,displayValue,missingRequiredDocuments,deferredDocuments,isDeferred,isMinor,maskDate,dateFromInput,dateInputValue} from "./logic.js";
 import {createDraftSession} from "./draft-ui.js";
 import {icon,labelWithIcon} from "./icons.js";
 const card=document.querySelector("#question-card");
@@ -39,6 +39,7 @@ function changed(key,value){
  }
  if(key==="identityDocument")delete answers.identityExpiry;
  if(key==="home"){delete answers.homeProof;delete answers.homeDate;}
+ if(key==="homeProof")delete answers.homeDate;
  if(key==="birthDate"){
  if(!value.trim() || ageFromDate(value)===null){delete answers.emancipated;delete answers.contactName;delete answers.contactPhone;delete answers.contactEmail;}
  else if(!isMinor({...answers,birthDate:value})){delete answers.contactName;delete answers.contactPhone;delete answers.contactEmail;delete answers.emancipated;}
@@ -73,7 +74,8 @@ function fieldNode(f){
  choices.querySelectorAll("label").forEach(n=>n.classList.toggle("selected",n.querySelector("input").checked));
  showError();
  if(f.key==="specialReason")refreshDocuments();
-
+ // homeProof change le type de homeDate (mois vs année) : reconstruire le step.
+ if(f.key==="homeProof"){render();return;}
  updateProgress();
  });
  const copy=el("span");copy.append(el("strong","",label));if(hint)copy.append(el("small","",hint));
@@ -82,7 +84,25 @@ function fieldNode(f){
  fs.append(choices);wrap.append(fs);
  }else{
  const label=el("label","field-label",f.label);label.htmlFor=inputId;wrap.append(label);
- if(["birthdate","date","month"].includes(f.type)){
+ if(["birthdate","date","month","year"].includes(f.type)){
+ if(f.type==="year"){
+ const input=el("input","text-input document-date-input");input.type="text";input.id=inputId;
+ input.placeholder="AAAA";input.inputMode="numeric";input.maxLength=4;input.autocomplete="off";
+ input.value=answers[f.key]||"";input.setAttribute("aria-describedby",f.key+"-format "+error.id);input.required=f.required;
+ const hint=el("p","validation-hint","Saisissez l’année du document (AAAA).");hint.id=f.key+"-format";
+ const validity=el("p","date-feedback");validity.hidden=true;
+ function feedback(){
+ const value=answers[f.key];
+ validity.hidden=!value;
+ validity.textContent=yearAge(value);
+ }
+ input.addEventListener("input",()=>{
+ const digits=input.value.replace(/\D/g,"").slice(0,4);
+ input.value=digits;changed(f.key,digits);feedback();if(!error.hidden)showError();updateProgress();
+ });
+ input.addEventListener("blur",()=>{input.value=answers[f.key]||"";showError();});
+ wrap.append(input,hint,validity);feedback();
+ }else{
  const kind=f.type==="month"?"month":"date",format=kind==="month"?"MM/AAAA":"JJ/MM/AAAA";
  const control=el("div","document-date-control");
  const input=el("input","text-input document-date-input");input.type="text";input.id=inputId;
@@ -125,6 +145,7 @@ function fieldNode(f){
  });
  if(picker.type!==kind)calendar.hidden=true;
  wrap.append(hint,validity);feedback();
+ }
  }else{
  const input=el(f.type==="textarea"?"textarea":"input","text-input");input.id=inputId;
  if(f.type!=="textarea")input.type=f.type;

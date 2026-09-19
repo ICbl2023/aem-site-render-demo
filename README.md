@@ -162,7 +162,7 @@ et des documents synthétiques. Ils ne prouvent pas une réception dans Gmail.
 | Naissance vide | Âge inconnu : aucune branche d’âge présumée ; l’audit indique les éléments à déterminer par AEM |
 | Expiration renseignée | Durée restante ou expiration affichée en évidence, sans conclusion de conformité |
 | Domicile | « Quelle est votre situation ? » ; chez les parents ou justificatif à son nom |
-| Justificatifs | Facture, quittance de loyer ou avis d’imposition ; mois + année uniquement |
+| Justificatifs | Facture / quittance : mois + année (< 6 mois) ; dernier avis d’imposition : année seule |
 | Chez les parents | Justificatif du parent, attestation d’hébergement et identité du parent |
 | Contact | Uniquement si le candidat est mineur ; téléphone/email candidat toujours demandés |
 | Permis | Fichier du permis directement demandé et obligatoire |
@@ -170,7 +170,7 @@ et des documents synthétiques. Ils ne prouvent pas une réception dans Gmail.
 | 15 ans | ASSR 2 / à défaut ASSR 1 |
 | 16 à 21 ans | ASSR 2 |
 | Français de 17 ans | Recensement |
-| Français de 18 à 25 ans | JDC / avis de situation |
+| Français de 17 à 24 ans | JDC / avis de situation |
 | 26 ans et plus | Aucun justificatif lié à la JDC |
 | Compléments | Justificatifs particuliers ANTS, avis médical Permis selon les branches existantes |
 

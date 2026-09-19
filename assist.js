@@ -25,7 +25,7 @@ const QUESTIONS={
  contactEmail:{first:"Son adresse e-mail, si vous la connaissez ? Sinon dites « je ne sais pas ».",retry:"Une adresse e-mail, ou « je ne sais pas »."},
  home:{first:"Côté logement : êtes-vous hébergé chez vos parents, ou avez-vous un justificatif à votre nom ?",retry:"Dites « chez mes parents » ou « à mon nom »."},
  homeProof:{first:"Quel justificatif de domicile avez-vous : une facture, une quittance de loyer ou un avis d’imposition ?",retry:"Facture, quittance ou avis d’imposition ?"},
- homeDate:{first:"De quel mois date ce justificatif ? Par exemple « août 2026 ». Sinon dites « je ne sais pas ».",retry:"Le mois et l’année, ou « je ne sais pas »."},
+ homeDate:{first:"Indiquez la date de ce justificatif : mois et année pour une facture ou une quittance, année seule pour un avis d’imposition. Sinon dites « je ne sais pas ».",retry:"La date du document, ou « je ne sais pas »."},
  hostingDate:{first:"De quand date l’attestation d’hébergement ? Sinon dites « je ne sais pas ».",retry:"Une date, ou « je ne sais pas »."},
  parentExpiry:{first:"Jusqu’à quand la pièce d’identité de votre parent est-elle valable ? Sinon « je ne sais pas ».",retry:"Une date, ou « je ne sais pas »."},
  special:{first:"Dernière chose : votre situation demande-t-elle un justificatif particulier, par exemple médical ou de handicap ? Oui ou non.",retry:"Oui ou non ?"},

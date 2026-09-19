@@ -24,7 +24,17 @@ export const config = {
  candidateMail: process.env.AEM_CANDIDATE_MAIL !== "0",
  aiEnabled: Boolean(process.env.ANTHROPIC_API_KEY),
  mailAttachments: process.env.AEM_MAIL_ATTACHMENTS === "1",
- retentionDays: Number(process.env.AEM_RETENTION_DAYS || 365),
+ // 0 = pas de suppression auto des dossiers finalisés (à valider avec Luc avant d'activer une durée).
+ retentionDays: Number(process.env.AEM_RETENTION_DAYS || 0),
  trustProxy: process.env.TRUST_PROXY === "1",
+ // local (défaut legacy-fs) | memory | r2 — les meta restent sur AEM_DATA_DIR / AEM_DRAFT_DIR
+ blobDriver: process.env.AEM_BLOB_DRIVER || "local",
+ blobDir: process.env.AEM_BLOB_DIR || "",
+ r2Endpoint: process.env.AEM_R2_ENDPOINT || "",
+ r2AccessKeyId: process.env.AEM_R2_ACCESS_KEY_ID || "",
+ r2SecretAccessKey: process.env.AEM_R2_SECRET_ACCESS_KEY || "",
+ r2Bucket: process.env.AEM_R2_BUCKET || "",
+ r2Prefix: process.env.AEM_R2_PREFIX || "aem",
+ r2Region: process.env.AEM_R2_REGION || "auto",
  limits
 };

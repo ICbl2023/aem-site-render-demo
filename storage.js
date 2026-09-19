@@ -1,6 +1,7 @@
 import {mkdir,readdir,readFile,writeFile,rename,rm} from "node:fs/promises";
 import path from "node:path";
 import {ageFromDate,workflows} from "./logic.js";
+import {createLegacyFsBlobStore,createFileBlobs} from "./blob-store.js";
 
 export const UUID_RE=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 export function isSubmissionId(id){return typeof id==="string" && UUID_RE.test(id);}
@@ -55,8 +56,10 @@ function summary(meta){
  };
 }
 
-export function createStorage(dataDir){
+export function createStorage(dataDir,{files,blobs,blobScope="dossiers"}={}){
  const root=path.resolve(dataDir);
+ // Octets des pièces : legacy-fs (défaut) ou backend R2/memory via createFileBlobs. Les meta.json restent locaux.
+ const fileStore=files || (blobs?createFileBlobs(blobs,{scope:blobScope}):createLegacyFsBlobStore(root));
  // Écritures sérialisées par dossier (et pour l'index) : deux mises à jour concurrentes ne perdent plus d'entrée d'historique.
  const locks=new Map();
  function withLock(key,fn){
@@ -83,7 +86,7 @@ export function createStorage(dataDir){
  async function writeMeta(meta){
   meta.updatedAt=new Date().toISOString();
   const dir=path.join(root,meta.id);
-  await mkdir(path.join(dir,"files"),{recursive:true,mode:0o700});
+  await mkdir(dir,{recursive:true,mode:0o700});
   await writeJson(path.join(dir,"meta.json"),meta);
   return meta;
  }
@@ -120,13 +123,12 @@ export function createStorage(dataDir){
  async function saveUnlocked(submission,auditText,{incomplete=false,deferredCount=0}={}){
   await ensureRoot();
   const id=submission.submissionId;
-  const dir=path.join(root,id);
-  await mkdir(path.join(dir,"files"),{recursive:true,mode:0o700});
+  await mkdir(path.join(root,id),{recursive:true,mode:0o700});
   const filesMeta=[];
   for(let i=0;i<submission.uploads.length;i++){
    const file=submission.uploads[i];
    const storedAs=i+"-"+sanitizeName(file.name);
-   await writeFile(path.join(dir,"files",storedAs),file.content,{mode:0o600});
+   await fileStore.putFile(id,storedAs,file.content,file.contentType);
    filesMeta.push({index:i,key:file.key,name:file.name,size:file.size,contentType:file.contentType,storedAs});
   }
   const meta={
@@ -190,12 +192,10 @@ export function createStorage(dataDir){
   const meta=await readMeta(id);
   if(!meta)return null;
   meta.files||=[];meta.history||=[];
-  const dir=path.join(root,id);
-  await mkdir(path.join(dir,"files"),{recursive:true,mode:0o700});
   let index=meta.files.reduce((max,f)=>Math.max(max,f.index),-1)+1;
   for(const file of uploads){
    const storedAs=index+"-"+sanitizeName(file.name);
-   await writeFile(path.join(dir,"files",storedAs),file.content,{mode:0o600});
+   await fileStore.putFile(id,storedAs,file.content,file.contentType);
    meta.files.push({index,key,name:file.name,size:file.size,contentType:file.contentType,storedAs,source:"comptoir",addedAt:new Date().toISOString(),addedBy:String(by).slice(0,64)});
    index++;
   }
@@ -212,12 +212,13 @@ export function createStorage(dataDir){
   if(!meta)return null;
   const file=(meta.files||[]).find(f=>f.index===Number(index));
   if(!file)return null;
-  let content;
-  try{content=await readFile(path.join(root,id,"files",file.storedAs));}catch(e){if(e.code==="ENOENT")return null;throw e;}
+  const content=await fileStore.getFile(id,file.storedAs);
+  if(!content)return null;
   return {meta,file,content};
  }
  function remove(id){
   return withLock(id,async()=>{
+   await fileStore.removeAll(id).catch(()=>{});
    await rm(path.join(root,id),{recursive:true,force:true});
    await rebuildIndex();
   });
@@ -238,5 +239,5 @@ export function createStorage(dataDir){
   }
   return removed;
  }
- return {root,list,get,save,update,addFiles,readFileContent,remove,purgeOlderThan,rebuildIndex};
+ return {root,list,get,save,update,addFiles,readFileContent,remove,purgeOlderThan,rebuildIndex,fileStore};
 }

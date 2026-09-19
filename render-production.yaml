@@ -17,7 +17,7 @@ services:
     disk:
       name: aem-data
       mountPath: /var/data
-      sizeGB: 5
+      sizeGB: 1
     envVars:
       - key: NODE_VERSION
         value: "22"
@@ -25,7 +25,7 @@ services:
         value: 0.0.0.0
       - key: TRUST_PROXY
         value: "1"
-      # RENDER_EXTERNAL_URL est fourni par Render ; server-config.js l’utilise comme AEM_ORIGIN si AEM_ORIGIN est vide.
+      # RENDER_EXTERNAL_URL est fourni par Render ; server-config.js l'utilise comme AEM_ORIGIN si AEM_ORIGIN est vide.
       - key: AEM_RECEIPT_DIR
         value: /var/data/aem-receipts
       - key: AEM_DATA_DIR
@@ -34,19 +34,32 @@ services:
         value: /var/data/aem-brouillons
       - key: AEM_DRAFTS
         value: "1"
+      - key: AEM_BLOB_DRIVER
+        value: "r2"
+      - key: AEM_R2_PREFIX
+        value: "aem"
+      - key: AEM_R2_REGION
+        value: "auto"
+      - key: AEM_R2_ENDPOINT
+        sync: false
+      - key: AEM_R2_ACCESS_KEY_ID
+        sync: false
+      - key: AEM_R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: AEM_R2_BUCKET
+        sync: false
       - key: AEM_MAIL_ATTACHMENTS
         value: "0"
       - key: AEM_CANDIDATE_MAIL
         value: "1"
       - key: AEM_RETENTION_DAYS
-        value: "365"
+        value: "0"
       - key: SMTP_PORT
         value: "587"
-      # Format exact attendu par admin-auth.js : identifiant:motdepasse:rôle
-      # Valeur à saisir dans le dashboard : demo:demo:responsable
+      # Format exact attendu par admin-auth.js : identifiant:motdepasse:role
       - key: AEM_ADMIN_ACCOUNTS
         sync: false
-      # Laisser vide en production réelle (sinon l’écran de connexion est prérempli).
+      # Laisser vide en production reelle (sinon l'ecran de connexion est prerempli).
       - key: AEM_ADMIN_PREFILL
         sync: false
       - key: AEM_FROM

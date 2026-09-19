@@ -1,11 +1,12 @@
 // Brouillons partagés : réponses ET pièces conservées côté serveur, pour que le candidat reprenne son dossier
 // depuis un autre appareil, ou qu'un proche le termine avec lui, sans rien re-photographier.
 // Un brouillon n'est pas un envoi : il reste invisible de l'espace admin et s'efface à l'expiration.
-import {mkdir,readdir,readFile,writeFile,rename,rm,unlink} from "node:fs/promises";
+import {mkdir,readdir,readFile,writeFile,rename,rm} from "node:fs/promises";
 import path from "node:path";
 import {randomBytes,createHash,timingSafeEqual,randomUUID} from "node:crypto";
 import {DRAFT_TTL} from "./drafts.js";
 import {UUID_RE} from "./storage.js";
+import {createLegacyFsBlobStore,createFileBlobs} from "./blob-store.js";
 
 // Le jeton « <draftId>.<secret> » tient dans le fragment d'une URL : 32 octets en base64url font 43 caractères.
 const SECRET_RE=/^[A-Za-z0-9_-]{43}$/;
@@ -47,8 +48,9 @@ function publicView(meta){
  };
 }
 
-export function createDraftStorage(dataDir,{now=()=>Date.now()}={}){
+export function createDraftStorage(dataDir,{now=()=>Date.now(),files,blobs,blobScope="brouillons"}={}){
  const root=path.resolve(dataDir);
+ const fileStore=files || (blobs?createFileBlobs(blobs,{scope:blobScope}):createLegacyFsBlobStore(root));
  // Écritures sérialisées par brouillon : le téléphone et l'ordinateur peuvent sauvegarder en même temps.
  const locks=new Map();
  function withLock(key,fn){
@@ -59,6 +61,10 @@ export function createDraftStorage(dataDir,{now=()=>Date.now()}={}){
   return run;
  }
  const dirOf=draftId=>path.join(root,draftId);
+ async function eraseDraft(draftId){
+  await fileStore.removeAll(draftId).catch(()=>{});
+  await rm(dirOf(draftId),{recursive:true,force:true});
+ }
  async function writeMeta(meta){
   const target=path.join(dirOf(meta.draftId),"meta.json");
   await mkdir(dirOf(meta.draftId),{recursive:true,mode:0o700});
@@ -77,7 +83,7 @@ export function createDraftStorage(dataDir,{now=()=>Date.now()}={}){
    if(e instanceof SyntaxError){console.error("[brouillon] meta.json illisible pour "+draftId);return null;}
    throw e;
   }
-  if(!Number.isFinite(meta.expiresAt) || meta.expiresAt<=now()){await rm(dirOf(draftId),{recursive:true,force:true});return null;}
+  if(!Number.isFinite(meta.expiresAt) || meta.expiresAt<=now()){await eraseDraft(draftId);return null;}
   return meta;
  }
  async function authorized(token){
@@ -142,13 +148,11 @@ export function createDraftStorage(dataDir,{now=()=>Date.now()}={}){
     const total=meta.files.reduce((sum,f)=>sum+f.size,0)+uploads.reduce((sum,f)=>sum+f.size,0);
     if(meta.files.length+uploads.length>limits.fileCount)throw draftTooLarge("Trop de documents dans ce dossier ("+limits.fileCount+" au maximum).");
     if(total>limits.totalBytes)throw draftTooLarge("L’ensemble des documents dépasse la taille autorisée.");
-    const dir=path.join(dirOf(parsed.draftId),"files");
-    await mkdir(dir,{recursive:true,mode:0o700});
     let index=meta.files.reduce((max,f)=>Math.max(max,f.index),-1)+1;
     const added=[];
     for(const upload of uploads){
      const storedAs=index+"-"+sanitizeName(upload.name);
-     await writeFile(path.join(dir,storedAs),upload.content,{mode:0o600});
+     await fileStore.putFile(parsed.draftId,storedAs,upload.content,upload.contentType);
      // Empreinte calculée ici, sur les octets écrits : jamais celle annoncée par le navigateur.
      const sha256=createHash("sha256").update(upload.content).digest("hex");
      const entry={index,key,name:upload.name,size:upload.size,contentType:upload.contentType,sha256,storedAs,addedAt:new Date().toISOString()};
@@ -165,8 +169,9 @@ export function createDraftStorage(dataDir,{now=()=>Date.now()}={}){
    if(!meta)return null;
    const entry=(meta.files||[]).find(f=>f.index===Number(index));
    if(!entry)return null;
-   try{return {entry:fileView(entry),content:await readFile(path.join(dirOf(meta.draftId),"files",entry.storedAs))};}
-   catch(e){if(e.code==="ENOENT")return null;throw e;}
+   const content=await fileStore.getFile(meta.draftId,entry.storedAs);
+   if(!content)return null;
+   return {entry:fileView(entry),content};
   },
   removeFile(token,index){
    const parsed=parseDraftToken(token);
@@ -177,7 +182,7 @@ export function createDraftStorage(dataDir,{now=()=>Date.now()}={}){
     const entry=(meta.files||[]).find(f=>f.index===Number(index));
     if(!entry)return {files:(meta.files||[]).map(fileView)};
     meta.files=meta.files.filter(f=>f!==entry);
-    await unlink(path.join(dirOf(parsed.draftId),"files",entry.storedAs)).catch(()=>{});
+    await fileStore.removeFile(parsed.draftId,entry.storedAs).catch(()=>{});
     const savedAt=now();
     Object.assign(meta,{savedAt,expiresAt:savedAt+DRAFT_TTL});
     await writeMeta(meta);
@@ -190,7 +195,7 @@ export function createDraftStorage(dataDir,{now=()=>Date.now()}={}){
    return withLock(parsed.draftId,async()=>{
     const meta=await authorized(token);
     if(!meta)return false;
-    await rm(dirOf(parsed.draftId),{recursive:true,force:true});
+    await eraseDraft(parsed.draftId);
     return true;
    });
   },
@@ -202,6 +207,7 @@ export function createDraftStorage(dataDir,{now=()=>Date.now()}={}){
     if(!await readMeta(draftId).catch(()=>null))removed++;
    }
    return removed;
-  }
+  },
+  fileStore
  };
 }

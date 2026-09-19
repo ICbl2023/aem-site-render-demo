@@ -78,7 +78,7 @@ async function showPanel(info){
 async function loadStatus(){
  try{
  const s=await api("status");
- serviceStatus.textContent="Messagerie "+(s.mail?"activée":"non configurée")+" · accusé candidat "+(s.candidateMail?"activé":"désactivé")+" · assistant IA "+(s.ai?"activé":"désactivé")+" · conservation "+(s.retentionDays?s.retentionDays+" jours":"désactivée")+" · "+s.accounts+" compte(s) · stockage "+s.dataDir+(s.chat?" · assistant du site : "+(s.chat.total??0)+" question(s)":"");
+ serviceStatus.textContent="Messagerie "+(s.mail?"activée":"non configurée")+" · accusé candidat "+(s.candidateMail?"activé":"désactivé")+" · assistant IA "+(s.ai?"activé":"désactivé")+" · conservation "+(s.retentionDays?s.retentionDays+" jours":"désactivée")+" · fichiers "+(s.blobDriver||"local")+" · "+s.accounts+" compte(s) · stockage "+s.dataDir+(s.chat?" · assistant du site : "+(s.chat.total??0)+" question(s)":"");
  }catch(e){serviceStatus.textContent="État du service indisponible : "+e.message;}
 }
 async function loadStats(){

@@ -178,12 +178,12 @@ test("Documents du dossier figés à la date de réception (âge qui bascule le 
  const h=await startHarness();
  try{
  const today=todayISO(),suffix=today.slice(5)==="02-29"?"02-28":today.slice(5);
- const a={...candidate,birthDate:String(Number(today.slice(0,4))-26).padStart(4,"0")+"-"+suffix}; // 26 ans aujourd'hui : plus de JDC
- assert.equal(ageFromDate(a.birthDate),26);assert.ok(!documentsFor(a).some(d=>d.key==="jdc"));
+ const a={...candidate,birthDate:String(Number(today.slice(0,4))-25).padStart(4,"0")+"-"+suffix}; // 25 ans aujourd'hui : plus de JDC
+ assert.equal(ageFromDate(a.birthDate),25);assert.ok(!documentsFor(a).some(d=>d.key==="jdc"));
  const id=crypto.randomUUID();
  assert.equal((await send(h,form(a,attachmentsFor(a),id))).status,200);
  const metaPath=h.dataDir+"/"+id+"/meta.json",meta=JSON.parse(await readFile(metaPath,"utf8"));
- meta.createdAt=new Date(Date.now()-86400000).toISOString(); // reçu la veille, à 25 ans : la JDC faisait partie du dossier
+ meta.createdAt=new Date(Date.now()-86400000).toISOString(); // reçu la veille, à 24 ans : la JDC faisait partie du dossier
  await writeFile(metaPath,JSON.stringify(meta));
  const {cookie}=await login(h);
  const detail=await (await fetch(h.url+"/api/admin/dossiers/"+id,{headers:{Cookie:cookie}})).json();

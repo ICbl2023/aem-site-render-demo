@@ -87,6 +87,19 @@ export function monthParts(value){
  return y>=1 && m>=1 && m<=12?{y,m}:null;
 }
 export function formatMonth(value){return monthParts(value)?value.split("-").reverse().join("/"):"Non renseigné ou invalide";}
+export function yearParts(value){
+ if(typeof value!=="string" || !/^\d{4}$/.test(value))return null;
+ const y=Number(value);
+ return y>=1000 && y<=9999?{y}:null;
+}
+export function formatYear(value){return yearParts(value)?value:"Non renseignée ou invalide";}
+export function yearAge(value,now=new Date()){
+ const d=yearParts(value),t=dateParts(todayISO(now));
+ if(!d)return value?"Année du document invalide":"Année du document non renseignée";
+ if(d.y>t.y)return "Année du document dans le futur";
+ if(d.y===t.y)return "Document de l’année en cours";
+ return "Ancienneté en années civiles : "+(t.y-d.y)+" an"+(t.y-d.y>1?"s":"")+".";
+}
 export function monthAge(value,now=new Date()){
  const d=monthParts(value),t=dateParts(todayISO(now));
  if(!d)return value?"Mois du document invalide":"Mois du document non renseigné";
@@ -130,12 +143,21 @@ export function stepsFor(a) {
  if(ageDocuments(a).length)s.push(step("ageFiles","Vos justificatifs liés à l’âge","Documents",[],{documentGroup:"age",hint:"Ajoutez les documents dont vous disposez. Si une pièce manque, AEM verra avec vous."}));
  if(isMinor(a))s.push(step("contact","Une personne à contacter en cas de besoin","Coordonnées",[field("contactName","Nom et prénom du responsable","text",true),field("contactPhone","Téléphone du responsable","tel",true),field("contactEmail","E-mail du responsable (facultatif)","email",false)],{hint:"Pour un mineur, indiquez le parent ou le responsable légal à contacter."}));
  s.push(step("home","Quelle est votre situation ?","Domicile",[choice("home","Situation",[["parents","Hébergé(e) chez mes parents"],["own","Justificatif à mon nom"]])],{hint:"Si aucune situation ne correspond, contactez AEM avant de poursuivre."}));
- // Justificatif de domicile différé : le type et le mois ne bloquent plus (AEM récupère la pièce).
+ // Justificatif de domicile différé : le type et la date ne bloquent plus (AEM récupère la pièce).
  const homeDeferred=isDeferred(a,"home_"+a.home);
- s.push(step("homeFiles","Votre justificatif de domicile","Domicile",[
-  choice("homeProof","Type de justificatif",[["facture","Facture de moins de 6 mois"],["loyer","Quittance de loyer de moins de 6 mois"],["impot","Avis d’imposition de moins de 6 mois"]],!homeDeferred),
-  {...field("homeDate","Mois et année du document","month",!homeDeferred),documentDate:true,maxMonths:6}
- ],{documentGroup:"home",hint:"Joignez un justificatif de moins de 6 mois. Indiquez le mois et l’année du document. Un seul type suffit. Avis de prélèvement et attestation de contrat ne sont pas acceptés dans ce parcours."}));
+ const homeProofField=choice("homeProof","Type de justificatif",[
+  ["facture","Facture d’abonnement de moins de 6 mois"],
+  ["loyer","Quittance de loyer de moins de 6 mois"],
+  ["impot","Dernier avis d’imposition"]
+ ],!homeDeferred);
+ // Avis d’imposition : année seule. Facture / quittance : mois + année (< 6 mois).
+ const homeDateField=a.homeProof==="impot"
+  ?{...field("homeDate","Année du document","year",!homeDeferred),documentDate:true}
+  :{...field("homeDate","Mois et année du document","month",!homeDeferred),documentDate:true,maxMonths:6};
+ const homeHint=a.homeProof==="impot"
+  ?"Joignez votre dernier avis d’imposition et indiquez son année. Un seul type de justificatif suffit. Avis de prélèvement et attestation de contrat ne sont pas acceptés dans ce parcours."
+  :"Joignez un justificatif de moins de 6 mois. Indiquez le mois et l’année du document. Un seul type suffit. Avis de prélèvement et attestation de contrat ne sont pas acceptés dans ce parcours.";
+ s.push(step("homeFiles","Votre justificatif de domicile","Domicile",[homeProofField,homeDateField],{documentGroup:"home",hint:homeHint}));
  if(flow==="ants"){
  s.push(step("special","Votre situation nécessite-t-elle un justificatif particulier ?","Compléments",[choice("special","Justificatif particulier")],{hint:"Répondez selon les indications dont vous disposez. AEM confirmera les pièces nécessaires ; ne détaillez pas de diagnostic médical."}));
  if(a.special==="oui")s.push(step("specialFiles","Quel justificatif particulier devez-vous transmettre ?","Compléments",[choice("specialReason","Situation",[["medical","Visite médicale nécessaire"],["handicap","Situation de handicap / affection"],["existing","Permis ou examen déjà existant"],["other","Autre situation particulière"]])],{documentGroup:"special",hint:"Ajoutez le document correspondant à votre situation ou demandé par ANTS."}));
@@ -149,12 +171,17 @@ export function stepsFor(a) {
  s.push(step("summary","Vérifiez votre récapitulatif","Récapitulatif"));
  return s;
 }
+export function needsJdc(a,now=new Date()){
+ // Français : JDC de 17 ans inclus à 24 ans inclus (pas à 16, pas à 25+). Étrangers : jamais.
+ const age=ageFromDate(a.birthDate,now);
+ return a.nationality==="francaise" && age!==null && age>=17 && age<25;
+}
 export function ageDocuments(a,now=new Date()){
  const age=ageFromDate(a.birthDate,now),d=[];
  if(age===15)d.push({key:"assr_15",label:"ASSR 2 / à défaut ASSR 1",group:"age"});
  if(age>=16 && age<=21)d.push({key:"assr_2",label:"ASSR 2",group:"age"});
  if(a.nationality==="francaise" && age===17)d.push({key:"recensement",label:"Recensement",group:"age"});
- if(a.nationality==="francaise" && age>=18 && age<=25)d.push({key:"jdc",label:"JDC ou avis de situation",group:"age"});
+ if(needsJdc(a,now))d.push({key:"jdc",label:"JDC ou avis de situation",group:"age"});
  return d;
 }
 export function identityLabel(a){return (identities[a.nationality]||[]).find(x=>x[0]===a.identityDocument)?.[1]||"Pièce d’identité";}
@@ -204,6 +231,12 @@ export function fieldError(f,value,now=new Date()){
   const months=(t.y-d.y)*12+t.m-d.m;
   if(months>f.maxMonths)return "Ce document doit dater de moins de "+f.maxMonths+" mois.";
  }
+ if(f.type==="year" && !yearParts(value))return "Indiquez une année valide (AAAA).";
+ if(f.type==="year" && yearParts(value)){
+  const y=yearParts(value).y,t=dateParts(todayISO(now));
+  if(y>t.y)return "L’année du document ne peut pas être dans le futur.";
+  if(y<t.y-80)return "Vérifiez l’année du document.";
+ }
  if(f.type==="email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))return "Vérifiez l’adresse e-mail.";
  if(f.type==="tel" && (!/^\+?[\d\s().-]{6,30}$/.test(value) || value.replace(/\D/g, "").length<6))return "Vérifiez le numéro de téléphone.";
  return "";
@@ -238,12 +271,16 @@ export function missingRequiredDocuments(a,files=[],now=new Date()){
  return documentsFor(a,now).filter(d=>d.requiredUpload && !files.some(f=>f.key===d.key) && !(d.deferrable && isDeferred(a,d.key)));
 }
 export function subjectFor(a){const prefix={ants:"Dossier ANTS",permis:"Dossier permis"}[a.workflow]||"Dossier";return prefix+" – "+(a.birthName||"").toUpperCase()+" "+(a.firstName||"");}
-export function displayValue(f,value){if(!value)return "Non renseigné";if(f.type==="choice")return f.options.find(x=>x[0]===value)?.[1]||"À confirmer";if(f.type==="month")return formatMonth(value);if(f.type==="date" || f.type==="birthdate")return formatDate(value);return value;}
+export function displayValue(f,value){if(!value)return "Non renseigné";if(f.type==="choice")return f.options.find(x=>x[0]===value)?.[1]||"À confirmer";if(f.type==="month")return formatMonth(value);if(f.type==="year")return formatYear(value);if(f.type==="date" || f.type==="birthdate")return formatDate(value);return value;}
 export function auditText(a,files=[],now=new Date()){
  const age=ageFromDate(a.birthDate,now),validity=expiryStatus(a.identityExpiry,now),docs=documentsFor(a,now);
  const names=key=>files.filter(f=>f.key===key).map(f=>f.name);
  const deferred=deferredDocuments(a,files,now),deferredKeySet=new Set(deferred.map(d=>d.key)),deferredLine="  À FOURNIR : le candidat indique ne pas avoir ce document ; à récupérer par AEM";
  const documentLines=group=>docs.filter(d=>d.group===group).map(d=>d.label+" :\n"+(names(d.key).length?names(d.key).map(n=>"  - "+n+" — transmis, à vérifier").join("\n"):deferredKeySet.has(d.key)?deferredLine:"  Aucun fichier transmis")).join("\n");
+ const homeTypeLabel={facture:"Facture d’abonnement",loyer:"Quittance de loyer",impot:"Dernier avis d’imposition"}[a.homeProof]||"Non renseigné";
+ const homeDateLines=a.homeProof==="impot"
+  ?["Année du document : "+formatYear(a.homeDate),yearAge(a.homeDate,now)]
+  :["Mois et année du document : "+formatMonth(a.homeDate),monthAge(a.homeDate,now)];
  const text=[
  "AUDIT – "+(workflows[a.workflow]||"").toUpperCase(),
  "Informations déclarées par le candidat. Fichier transmis ≠ document conforme.",
@@ -257,8 +294,7 @@ export function auditText(a,files=[],now=new Date()){
  text.push("\nDOCUMENTS LIÉS À L’ÂGE",age===null?"Âge inconnu : pièces à déterminer par AEM.":documentLines("age")||"Aucune pièce prévue pour cette branche.");
  if(isMinor(a,now))text.push("\nPERSONNE À CONTACTER","Nom et prénom : "+(a.contactName||"Non renseigné"),"Téléphone : "+(a.contactPhone||"Non renseigné"),"E-mail : "+(a.contactEmail||"Non renseigné"));
  text.push("\nDOMICILE","Situation : "+(a.home==="parents"?"Hébergé chez ses parents":"Justificatif à son nom"),
- "Type : "+({facture:"Facture",loyer:"Quittance de loyer",impot:"Avis d’imposition"}[a.homeProof]||"Non renseigné"),
- "Mois et année du document : "+formatMonth(a.homeDate),monthAge(a.homeDate,now),documentLines("home"));
+ "Type : "+homeTypeLabel,...homeDateLines,documentLines("home"));
  if(a.home==="parents")text.push("Attestation d’hébergement : à joindre datée d’aujourd’hui (modèle fourni dans le mail).");
  const extras=stepsFor(a).filter(s=>["emancipation","europeSituation","permitType","special","specialFiles","medical"].includes(s.id));
  if(extras.length)text.push("\nAUTRES INFORMATIONS");

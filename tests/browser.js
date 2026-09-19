@@ -15,7 +15,7 @@ try{
  const minor=profile==="mineur";
  const page=await browser.newPage({viewport:{width:390,height:844},reducedMotion:"reduce"});
  page.on("pageerror",e=>errors.push(e.message));page.on("dialog",d=>d.accept());
- const a={...candidate,workflow,birthDate:minor?"2009-03-12":"2006-03-12",nationality:minor?"francaise":"etrangere",identityDocument:minor?"cni_fr":"sejour",emancipated:"non",special:minor?"oui":"non",specialReason:"medical",medical:minor?"oui":"non",home:minor?"parents":"own",homeProof:minor?"impot":"facture",identityExpiry:"",homeDate:minor?"2026-08":"2026-08",contactName:"Debbie Exemple",contactPhone:"0600000001",contactEmail:"debbie@example.test"};
+ const a={...candidate,workflow,birthDate:minor?"2009-03-12":"2006-03-12",nationality:minor?"francaise":"etrangere",identityDocument:minor?"cni_fr":"sejour",emancipated:"non",special:minor?"oui":"non",specialReason:"medical",medical:minor?"oui":"non",home:minor?"parents":"own",homeProof:minor?"impot":"facture",identityExpiry:"",homeDate:minor?"2025":"2026-08",contactName:"Debbie Exemple",contactPhone:"0600000001",contactEmail:"debbie@example.test"};
  const path=stepsFor(a);
  let deferredKey="";
  await page.addInitScript(()=>{
@@ -95,9 +95,15 @@ try{
  await input.fill("");assert.equal(await page.locator("#identityExpiry-error").isVisible(),false);
  }
  if(f.key==="homeDate"){
+ if(f.type==="year"){
+ assert.equal(await input.getAttribute("placeholder"),"AAAA");
+ await input.pressSequentially("2025");assert.equal(await input.inputValue(),"2025");
+ a.homeDate="2025";
+ }else{
  assert.equal(await input.getAttribute("placeholder"),"MM/AAAA");
  await input.pressSequentially("08");assert.equal(await input.inputValue(),"08/");await input.pressSequentially("2026");assert.equal(await picker.inputValue(),"2026-08");
  a.homeDate="2026-08";
+ }
  }
  }else{
  await page.locator("#field-"+f.key).fill(a[f.key]||"");
@@ -129,7 +135,7 @@ try{
  if(s.id==="ageFiles"){
  assert.deepEqual(await page.locator('input[type="file"]').evaluateAll(ns=>ns.map(n=>n.id)),minor?["upload-assr_2","upload-recensement"]:["upload-assr_2"]);
  assert.equal(await page.locator("#next-button").isDisabled(),true,"pièce d’âge obligatoire sans fichier ni report");
- // Report d'une pièce : #defer-jdc si la JDC est attendue (Français de 18 à 25 ans), sinon la première case de report disponible.
+ // Report d'une pièce : #defer-jdc si la JDC est attendue (Français de 17 à 24 ans), sinon la première case de report disponible.
  const deferIds=await page.locator(".defer-choice input").evaluateAll(ns=>ns.map(n=>n.id));
  const deferId=deferIds.includes("defer-jdc")?"defer-jdc":deferIds[0];
  assert.ok(deferId,"case de report disponible sur l’étape ageFiles");
