@@ -100,8 +100,11 @@
 .admin-files strong { display:block; color:var(--nuit); font-size:13px; overflow-wrap:anywhere; }
 .admin-files small { display:block; color:var(--sourdine); margin-top:2px; font-size:12px; }
 .admin-files a { color:var(--nuit); font-weight:700; font-size:13px; text-decoration-color:var(--ambre); text-decoration-thickness:2px; text-underline-offset:4px; }
-.admin-upload { display:inline-flex; align-items:center; gap:8px; margin-top:10px; padding:8px 12px; border:1.5px dashed #B8C4D6; border-radius:10px; color:var(--globe-fonce); font-size:13px; font-weight:700; cursor:pointer; }
+.admin-link-button { appearance:none; background:none; border:0; padding:0; margin:0; color:var(--nuit); font:inherit; font-weight:700; font-size:13px; text-decoration:underline; text-decoration-color:var(--ambre); text-decoration-thickness:2px; text-underline-offset:4px; cursor:pointer; }
+.admin-link-button:disabled { opacity:.5; cursor:wait; }
+.admin-upload { display:inline-flex; align-items:center; gap:8px; margin-top:10px; padding:8px 12px; border:1.5px dashed #B8C4D6; border-radius:10px; color:var(--globe-fonce); font-size:13px; font-weight:700; cursor:pointer; position:relative; }
 .admin-upload:hover { border-color:var(--nuit); background:#F4F6FA; }
+.admin-upload.is-dragover { border-color:var(--ambre); background:#FFF8E8; }
 .admin-upload input { position:absolute; width:1px; height:1px; opacity:0; }
 .admin-upload:has(input:focus-visible) { outline:3px solid var(--ambre); outline-offset:2px; }
 .admin-upload::before { content:"+"; display:grid; place-items:center; width:22px; height:22px; border-radius:50%; background:var(--horizon); color:var(--nuit); font:800 16px/1 var(--display); }

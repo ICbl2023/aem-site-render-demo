@@ -186,6 +186,7 @@ function renderDossier(dossier,documents){
  detailContent.append(summary);
  const meta=[ "Reçu le "+fmtDate(dossier.createdAt), "Réf. "+dossier.id.slice(0,8), "Accusé candidat : "+(candidateMailLabels[dossier.candidateMail]||"non envoyé")];
  if(dossier.expiresAt)meta.push("Sera effacé le "+fmtDay(dossier.expiresAt));
+ if(dossier.finalizedAt)meta.push("Finalisé le "+fmtDay(dossier.finalizedAt));
  detailContent.append(el("p","validation-hint",meta.join(" · ")));
  const contacts=el("div","admin-contacts");
  contacts.append(contactLine("Candidat"+(age!==null?" · "+age+" ans ("+frDate(a.birthDate||dossier.birthDate)+")":""),dossier.phone||a.phone,dossier.email||a.email));
@@ -208,6 +209,7 @@ function renderDossier(dossier,documents){
  if(canWrite()){
  detailContent.append(actionsBlock(dossier));
  detailContent.append(requestBlock(dossier,documents));
+ detailContent.append(mailBlock(dossier));
  detailContent.append(deleteBlock(dossier));
  }else detailContent.append(el("p","validation-hint admin-readonly","Compte en lecture seule : statut, note, relance, ajout de pièce et suppression sont réservés aux comptes de traitement."));
  detailContent.append(el("h2","","Historique"));
@@ -280,14 +282,29 @@ function checklist(dossier,documents){
  const href="./api/admin/dossiers/"+dossier.id+"/files/"+file.index;
  if(/^image\//.test(file.contentType) && !/hei[cf]/.test(file.contentType)){
  const thumb=el("a","admin-thumb");thumb.href=href;thumb.target="_blank";thumb.rel="noopener";
- const img=el("img");img.alt="Aperçu de "+file.name;thumb.append(img);li.append(thumb);
+ const img=el("img");img.alt="Aperçu de "+(file.displayName||file.name);thumb.append(img);li.append(thumb);
  fetch(href,{credentials:"same-origin"}).then(r=>r.ok?r.blob():null).then(b=>{if(b){const url=URL.createObjectURL(b);previews.add(url);img.src=url;}}).catch(()=>{});
  }
- const info=el("span");info.append(el("strong","",file.name),el("small","",file.contentType+" · "+Math.round(file.size/1024)+" Ko"+(file.source==="comptoir"?" · ajouté au comptoir"+(file.addedBy?" par "+file.addedBy:""):"")));
+ const info=el("span");info.append(el("strong","",file.displayName||file.name),el("small","",(file.originalName && file.originalName!==(file.displayName||file.name)?"fichier reçu : "+file.originalName+" · ":"")+file.contentType+" · "+Math.round(file.size/1024)+" Ko"+(file.source==="comptoir"?" · ajouté au comptoir"+(file.addedBy?" par "+file.addedBy:""):"")));
  const links=el("span");
  const open=el("a","","Ouvrir");open.href=href;open.target="_blank";open.rel="noopener";
  const download=el("a","","Télécharger");download.href=href+"?download=1";
  links.append(open," · ",download);
+ if(canWrite()){
+  const rename=el("button","admin-link-button","Renommer");rename.type="button";
+  rename.addEventListener("click",async()=>{
+   const current=file.displayName||file.name||"";
+   const next=window.prompt("Nom d’affichage du document",current);
+   if(next===null)return;
+   const wanted=String(next).trim();
+   if(!wanted || wanted===current)return;
+   rename.disabled=true;
+   try{await api("dossiers/"+dossier.id+"/files/"+file.index,{method:"PATCH",body:JSON.stringify({displayName:wanted})});}
+   catch(e){window.alert(e.message||"Renommage impossible.");rename.disabled=false;return;}
+   await loadStats();await openDossier(dossier.id,refreshWarning);
+  });
+  links.append(" · ",rename);
+ }
  li.append(info,links);list.append(li);
  }
  row.append(list);
@@ -295,15 +312,23 @@ function checklist(dossier,documents){
  if(canWrite()){
  const add=el("label","admin-upload");
  const input=el("input");input.type="file";input.multiple=true;input.accept=ACCEPT;input.setAttribute("aria-label","Ajouter une pièce reçue au comptoir pour "+doc.label);
- const text=el("span","",files.length?"Ajouter un autre fichier reçu au comptoir":"Ajouter une pièce reçue au comptoir");
+ const text=el("span","",files.length?"Ajouter un autre fichier reçu au comptoir":"Ajouter une pièce reçue au comptoir (ou glisser-déposer)");
  const error=el("p","field-error");error.hidden=true;error.setAttribute("role","alert");
- input.addEventListener("change",async()=>{
- if(!input.files.length)return;
- const body=new FormData();body.append("key",doc.key);for(const f of input.files)body.append("files",f,f.name);
- input.disabled=true;text.textContent="Envoi en cours…";error.hidden=true;
- try{await api("dossiers/"+dossier.id+"/files",{method:"POST",body});}
- catch(e){showError(error,e.message);input.disabled=false;text.textContent="Ajouter une pièce reçue au comptoir";return;}
- await loadStats();await openDossier(dossier.id,refreshWarning);
+ const sendFiles=async fileList=>{
+  if(!fileList?.length)return;
+  const body=new FormData();body.append("key",doc.key);for(const f of fileList)body.append("files",f,f.name);
+  input.disabled=true;text.textContent="Envoi en cours…";error.hidden=true;add.classList.remove("is-dragover");
+  try{await api("dossiers/"+dossier.id+"/files",{method:"POST",body});}
+  catch(e){showError(error,e.message);input.disabled=false;text.textContent="Ajouter une pièce reçue au comptoir (ou glisser-déposer)";return;}
+  await loadStats();await openDossier(dossier.id,refreshWarning);
+ };
+ input.addEventListener("change",async()=>{await sendFiles(input.files);input.value="";});
+ add.addEventListener("dragenter",e=>{e.preventDefault();add.classList.add("is-dragover");});
+ add.addEventListener("dragover",e=>{e.preventDefault();e.dataTransfer.dropEffect="copy";add.classList.add("is-dragover");});
+ add.addEventListener("dragleave",()=>add.classList.remove("is-dragover"));
+ add.addEventListener("drop",async e=>{
+  e.preventDefault();add.classList.remove("is-dragover");
+  await sendFiles(e.dataTransfer?.files);
  });
  add.append(input,text);row.append(add,error);
  }
@@ -320,7 +345,7 @@ function actionsBlock(dossier){
  for(const [value,label] of Object.entries(statuses)){
  const option=el("option","",label);option.value=value;option.selected=dossier.status===value;statusSelect.append(option);
  }
- const hint=el("p","validation-hint","« Prêt » prévient le candidat par e-mail que son dossier est complet et déposé (si l’accusé candidat est activé). « Classé » sort le dossier de la file ; il est effacé 3 mois plus tard.");
+ const hint=el("p","validation-hint","« Prêt » prévient le candidat par e-mail que son dossier est complet et déposé (si l’accusé candidat est activé). « Classé » sort le dossier de la file ; la conservation suit l’échéance de 2 mois après finalisation.");
  const noteLabel=el("label","field-label","Note interne");noteLabel.htmlFor="admin-note";
  const note=el("textarea");note.id="admin-note";note.value=dossier.adminNote||"";note.maxLength=4000;
  const save=el("button","next-button","Enregistrer");save.type="button";
@@ -384,6 +409,28 @@ function requestBlock(dossier,documents){
  await loadStats();await openDossier(dossier.id,refreshWarning);
  });
  block.append(messageLabel,message,error,button);
+ return block;
+}
+
+function mailBlock(dossier){
+ const block=el("section","admin-request");
+ block.append(el("h3","","Envoyer un message au candidat"));
+ block.append(el("p","","Destinataire : "+(dossier.email||"—")+" (adresse du dossier). Objet et message libres."));
+ const subjectLabel=el("label","field-label","Objet");subjectLabel.htmlFor="free-mail-subject";
+ const subject=el("input","text-input");subject.id="free-mail-subject";subject.maxLength=180;subject.required=true;
+ const messageLabel=el("label","field-label","Message");messageLabel.htmlFor="free-mail-message";
+ const message=el("textarea");message.id="free-mail-message";message.maxLength=4000;message.rows=5;message.required=true;
+ const error=el("p","field-error");error.hidden=true;error.setAttribute("role","alert");
+ const button=el("button","next-button","Envoyer le message");button.type="button";button.disabled=!dossier.email;
+ button.addEventListener("click",async()=>{
+  error.hidden=true;
+  if(!subject.value.trim() || !message.value.trim()){error.textContent="Renseignez l’objet et le message.";error.hidden=false;return;}
+  button.disabled=true;
+  try{await api("dossiers/"+dossier.id+"/mail",{method:"POST",body:JSON.stringify({subject:subject.value,message:message.value})});}
+  catch(e){showError(error,e.message);button.disabled=false;return;}
+  await loadStats();await openDossier(dossier.id,refreshWarning);
+ });
+ block.append(subjectLabel,subject,messageLabel,message,error,button);
  return block;
 }
 

@@ -24,8 +24,8 @@ export const config = {
  candidateMail: process.env.AEM_CANDIDATE_MAIL !== "0",
  aiEnabled: Boolean(process.env.ANTHROPIC_API_KEY),
  mailAttachments: process.env.AEM_MAIL_ATTACHMENTS === "1",
- // 0 = pas de suppression auto des dossiers finalisés (à valider avec Luc avant d'activer une durée).
- retentionDays: Number(process.env.AEM_RETENTION_DAYS || 0),
+ // 60 = conservation 2 mois des dossiers finalises (decision Luc). 0 = desactive.
+ retentionDays: Number(process.env.AEM_RETENTION_DAYS ?? 60),
  trustProxy: process.env.TRUST_PROXY === "1",
  // local (défaut legacy-fs) | memory | r2 — les meta restent sur AEM_DATA_DIR / AEM_DRAFT_DIR
  blobDriver: process.env.AEM_BLOB_DRIVER || "local",

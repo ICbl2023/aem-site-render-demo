@@ -26,7 +26,7 @@ export async function startHarness({port=0,...overrides}={}){
  const dataDir=path.resolve("test-results","data-"+crypto.randomUUID());
  await mkdir(receiptDir,{recursive:true});await mkdir(dataDir,{recursive:true});
  const origin="http://127.0.0.1"+(port?":"+port:"");
- const app=createApp({config:{origin,from:"aem@example.test",recipient:"admin@example.test",receiptDir,dataDir,adminPassword:"test-admin",candidateMail:false,...overrides},transport});
+ const app=createApp({config:{origin,from:"aem@example.test",recipient:"admin@example.test",receiptDir,dataDir,adminPassword:"test-admin",candidateMail:false,retentionDays:0,...overrides},transport});
  await new Promise(r=>app.listen(port,"127.0.0.1",r));
  const url="http://127.0.0.1:"+app.address().port;
  return {app,smtp,url,origin,dataDir,messages,rawMessages,async close(){await new Promise(r=>app.close(r));await new Promise(r=>smtp.close(r));}};

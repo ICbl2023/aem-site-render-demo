@@ -34,7 +34,7 @@ services:
       - key: AEM_CANDIDATE_MAIL
         value: "0"
       - key: AEM_RETENTION_DAYS
-        value: "30"
+        value: "60"
       # Saisir manuellement : demo:demo:responsable
       - key: AEM_ADMIN_ACCOUNTS
         sync: false

@@ -9,7 +9,8 @@ import Busboy from "busboy";
 import nodemailer from "nodemailer";
 import {config as defaultConfig} from "./server-config.js";
 import {cleanAnswers,answerErrors,documentsFor,auditText,subjectFor,acceptedExtensions,missingRequiredDocuments,deferredDocuments,isDeferred,workflows} from "./logic.js";
-import {createStorage,dossierStatuses,historyActions,isSubmissionId,STALE_AFTER_DAYS} from "./storage.js";
+import {createStorage,dossierStatuses,historyActions,isSubmissionId,STALE_AFTER_DAYS,fileDownloadName} from "./storage.js";
+import {expiresAtFrom,freeMailBody,prepareFreeMail,runRetentionMaintenance} from "./retention.js";
 import {createDraftStorage,parseDraftToken,DRAFT_ANSWER_BYTES} from "./draft-storage.js";
 import {createBlobStoreFromConfig} from "./blob-store.js";
 import {DRAFT_DAYS} from "./drafts.js";
@@ -296,7 +297,7 @@ export function createApp(options={}){
  if(session.role!=="lecture")return false;
  json(res,403,{error:"Compte en lecture seule : cette action est réservée aux comptes de traitement."});return true;
  }
- const expiresAtOf=meta=>config.retentionDays>0 && meta.createdAt?new Date(new Date(meta.createdAt).getTime()+config.retentionDays*86400000).toISOString():null;
+ const expiresAtOf=meta=>expiresAtFrom(meta,config.retentionDays);
  // Anti-CSRF : en-tête X-AEM-Admin (envoyé par admin.js) ; un corps JSON déclenche de toute façon une pré-vérification CORS refusée ici.
  function adminRequestAllowed(req){
  return req.headers["x-aem-admin"]==="1" || String(req.headers["content-type"]||"").toLowerCase().startsWith("application/json");
@@ -580,13 +581,44 @@ export function createApp(options={}){
  return json(res,200,{dossier:withWorkflowLabel(updated)});
  }catch(e){return json(res,e.status||400,{error:e.message||"Requête invalide."});}
  }
+ const freeMail=route.match(/^api\/admin\/dossiers\/([a-f0-9-]+)\/mail$/);
+ if(freeMail && req.method==="POST"){
+ try{
+  if(readOnly(session,res))return;
+  if(!isSubmissionId(freeMail[1]))return json(res,404,{error:"Dossier introuvable."});
+  const meta=await storage.get(freeMail[1]);
+  if(!meta)return json(res,404,{error:"Dossier introuvable."});
+  if(!transport || !config.from)return json(res,503,{error:"Messagerie non configurée : le message ne peut pas être envoyé."});
+  if(!meta.email)return json(res,400,{error:"Ce dossier ne comporte pas d’adresse e-mail."});
+  const body=await readJson(req,32*1024);
+  const mailBody=freeMailBody(body);
+  const lastMail=(meta.history||[]).filter(e=>e.action==="email_sent").at(-1);
+  if(lastMail && Date.now()-new Date(lastMail.at).getTime()<60*1000)return json(res,409,{error:"Un message vient d’être envoyé pour ce dossier."});
+  try{await sendTo(prepareFreeMail(meta,mailBody,config),meta.email);}
+  catch(e){return json(res,502,{error:"L’e-mail n’a pas pu être envoyé au candidat."+(e.message?" "+e.message:"")});}
+  const details="Message envoyé à "+meta.email+" — Objet : "+mailBody.subject;
+  const updated=await storage.update(meta.id,{},{by:session.user,action:"email_sent",details});
+  return json(res,200,{dossier:{...withWorkflowLabel(updated),expiresAt:expiresAtOf(updated)}});
+ }catch(e){return json(res,e.status||400,{error:e.message||"Requête invalide."});}
+ }
  const fileRoute=route.match(/^api\/admin\/dossiers\/([a-f0-9-]+)\/files\/(\d+)$/);
+ if(fileRoute && req.method==="PATCH"){
+  try{
+   if(readOnly(session,res))return;
+   if(!isSubmissionId(fileRoute[1]))return json(res,404,{error:"Fichier introuvable."});
+   const body=await readJson(req,8192);
+   const displayName=typeof body?.displayName==="string"?body.displayName:"";
+   const updated=await storage.renameFile(fileRoute[1],fileRoute[2],displayName,{by:session.user});
+   if(!updated)return json(res,404,{error:"Fichier introuvable."});
+   return json(res,200,{dossier:{...withWorkflowLabel(updated),expiresAt:expiresAtOf(updated)}});
+  }catch(e){return json(res,e.status||400,{error:e.message||"Requête invalide."});}
+ }
  if(fileRoute && req.method==="GET"){
  if(!isSubmissionId(fileRoute[1]))return json(res,404,{error:"Fichier introuvable."});
  const item=await storage.readFileContent(fileRoute[1],fileRoute[2]);
  if(!item)return json(res,404,{error:"Fichier introuvable."});
  const download=url.searchParams.has("download");
- const filename=encodeURIComponent(item.file.name).replace(/[!'()*]/g,c=>"%"+c.charCodeAt(0).toString(16).toUpperCase());
+ const filename=encodeURIComponent(fileDownloadName(item.file)).replace(/[!'()*]/g,c=>"%"+c.charCodeAt(0).toString(16).toUpperCase());
  res.writeHead(200,{"Content-Type":item.file.contentType,"Content-Length":item.content.length,"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","Content-Disposition":(download?"attachment":"inline")+"; filename*=UTF-8''"+filename});
  res.end(item.content);return;
  }
@@ -695,12 +727,17 @@ export function createApp(options={}){
  }
  });
  server.requestTimeout=120000;server.headersTimeout=15000;
- // Conservation : purge au démarrage puis une fois par jour, dossiers, reçus d'envoi et brouillons abandonnés ; jamais bloquante.
+ // Conservation : alertes J-7/J-3 puis purge au démarrage et une fois par jour ; jamais bloquante.
  const purgesDossiers=storageEnabled && config.retentionDays>0 && !options.storage;
  if(purgesDossiers || draftStorage){
  const purge=async()=>{
  try{
- const removed=purgesDossiers?await storage.purgeOlderThan(config.retentionDays):0;
+ const sendWarning=(transport && config.from && config.recipient)
+  ?(mail)=>sendTo(mail,config.recipient)
+  :null;
+ const result=purgesDossiers
+  ?await runRetentionMaintenance({storage,config,sendWarning})
+  :{warned7:0,warned3:0,removed:0};
  const cutoff=Date.now()-config.retentionDays*86400000;let receipts=0;
  for(const name of purgesDossiers?await readdir(receiptRoot).catch(()=>[]):[]){
  if(!name.endsWith(".json"))continue;
@@ -708,7 +745,7 @@ export function createApp(options={}){
  if(info && info.mtimeMs<cutoff){await unlink(file).catch(()=>{});receipts++;}
  }
    const drafts=draftStorage?await draftStorage.purgeExpired().catch(()=>0):0;
-   if(removed || receipts || drafts)console.log("Conservation : "+removed+" dossier(s), "+receipts+" reçu(s) et "+drafts+" brouillon(s) effacés.");
+   if(result.removed || receipts || drafts || result.warned7 || result.warned3)console.log("Conservation : "+result.removed+" dossier(s), "+receipts+" reçu(s), "+drafts+" brouillon(s), alertes J-7="+result.warned7+" J-3="+result.warned3+".");
    }catch(e){console.error("Purge impossible",e);}
   };
  purge();

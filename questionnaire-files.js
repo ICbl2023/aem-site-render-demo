@@ -7,5 +7,5 @@ export const questionnairePublicFiles=[
 ];
 export const questionnaireServerFiles=[
  "server.js","server-config.js","questionnaire-files.js","questionnaire-server.js",
- "storage.js","draft-storage.js","blob-store.js","admin-auth.js","chat-server.js","demo.js","demo.css","scripts/check-mail.js"
+ "storage.js","draft-storage.js","blob-store.js","retention.js","admin-auth.js","chat-server.js","demo.js","demo.css","scripts/check-mail.js"
 ];
