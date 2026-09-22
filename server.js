@@ -9,7 +9,7 @@ import Busboy from "busboy";
 import nodemailer from "nodemailer";
 import {config as defaultConfig} from "./server-config.js";
 import {cleanAnswers,answerErrors,documentsFor,auditText,subjectFor,acceptedExtensions,missingRequiredDocuments,deferredDocuments,isDeferred,workflows} from "./logic.js";
-import {createStorage,dossierStatuses,historyActions,isSubmissionId,STALE_AFTER_DAYS,fileDownloadName} from "./storage.js";
+import {createStorage,dossierStatuses,historyActions,adminNotifyStates,isSubmissionId,STALE_AFTER_DAYS,fileDownloadName} from "./storage.js";
 import {expiresAtFrom,freeMailBody,prepareFreeMail,runRetentionMaintenance} from "./retention.js";
 import {createDraftStorage,parseDraftToken,DRAFT_ANSWER_BYTES} from "./draft-storage.js";
 import {createBlobStoreFromConfig} from "./blob-store.js";
@@ -64,6 +64,12 @@ function adminPatch(body){
 export const aemContact="Auto-école Majolane\n46 rue de la République, 69330 Meyzieu\nTéléphone : 04 78 31 79 85\nE-mail : aem69330@gmail.com";
 const shortRef=id=>String(id).slice(0,8);
 const workflowLabel=answers=>workflows[answers.workflow]||"AEM";
+export const isValidEmail=value=>typeof value==="string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+export function dossierAdminUrl(base,id){
+ if(!base)return "";
+ const sep=base.includes("?")?"&":"?";
+ return base+sep+"dossier="+encodeURIComponent(id);
+}
 function requestBody(body,documents){
  if(typeof body!=="object" || !body || Array.isArray(body))throw fail(400,"Corps de requête invalide.");
  if(!Array.isArray(body.pieces) || !body.pieces.length)throw fail(400,"Sélectionnez au moins une pièce à demander.");
@@ -205,7 +211,7 @@ function validatedSubmission(fields,uploads,limits){
 export function prepareMail(submission,config,{adminUrl=null,attachments=false}={}){
  const audit=auditText(submission.answers,submission.uploads);
  const link=adminUrl||config.adminUrl||"";
- const adminLine=link?"\n\nOuvrir la zone admin : "+link:"\n\nOuvrez la zone admin sur votre serveur pour consulter l’audit complet et les pièces.";
+ const adminLine=link?"\n\nOuvrir le dossier dans la zone admin : "+link:"\n\nOuvrez la zone admin sur votre serveur pour consulter l’audit complet et les pièces.";
  const deferred=deferredDocuments(submission.answers,submission.uploads);
  const deferredLine=deferred.length?"\nPièces à récupérer : "+deferred.map(d=>d.label).join(", "):"";
  const name=(submission.answers.birthName||"").toUpperCase()+" "+(submission.answers.firstName||"");
@@ -258,6 +264,7 @@ export function createApp(options={}){
  const enabled=Boolean(demo || options.transport || (config.origin && (mailEnabled || storageEnabled)));
  const transport=demo?null:options.transport || (mailEnabled?createMailTransport(config):null);
  const rates=new Map(),inflight=new Set(),ackRates=new Map();let active=0;
+ const requestInflight=new Set(),notifyInflight=new Set();
  const ACK_MAX=3,ACK_WINDOW_MS=24*60*60*1000;
  // Brouillons : deux plafonds distincts par IP. Les sauvegardes sont fréquentes et légitimes (une par pause de saisie),
  // alors que créer un brouillon réserve de l'espace disque et doit rester rare. Les liens envoyés par mail le sont encore plus.
@@ -314,6 +321,28 @@ export function createApp(options={}){
  if(!result.accepted?.some(a=>String(a).toLowerCase()===address.toLowerCase()))throw fail(502,"Le serveur de messagerie n’a pas accepté le destinataire.");
  return result;
  }
+ async function markAdminNotify(id,state,details=""){
+  return storage.update(id,{adminNotify:state},{by:"système",...(details?{action:"admin_notify",details}:{})});
+ }
+ async function sendAdminNotification(submission){
+  const id=submission.submissionId||submission.id;
+  const payload={
+   submissionId:id,
+   answers:submission.answers||{},
+   uploads:Array.isArray(submission.uploads)?submission.uploads:[]
+  };
+  await sendTo(prepareMail(payload,config,{adminUrl:dossierAdminUrl(adminBase,id),attachments:Boolean(config.mailAttachments && payload.uploads.length)}),config.recipient);
+ }
+ // Au démarrage : une notification restée « sending » devient « uncertain » (pas de renvoi auto — évite les doublons).
+ async function settleInterruptedNotifications(){
+  if(!storageEnabled)return;
+  try{
+   for(const item of await storage.list()){
+    if(item.adminNotify!=="sending")continue;
+    await markAdminNotify(item.id,"uncertain","Notification interrompue (redémarrage) — reprise manuelle possible depuis l’Admin");
+   }
+  }catch(e){console.error("Reprise notifications interrompues impossible",e);}
+ }
  // Accusé de réception candidat : son échec n’annule jamais la soumission, l’état est tracé dans le dossier.
  // Plafond en mémoire de 3 accusés par adresse (normalisée) et par 24 h : le formulaire ne doit pas servir de relais de courrier.
  async function acknowledgeCandidate(submission){
@@ -337,7 +366,7 @@ export function createApp(options={}){
  const prefix=config.basePath+"/";if(!url.pathname.startsWith(prefix))return json(res,404,{error:"Page introuvable."});
  const route=url.pathname.slice(prefix.length);
  if(req.method==="GET" && route==="api/config")return json(res,200,{enabled,limits:config.limits,drafts:draftsEnabled,draftDays:DRAFT_DAYS,draftMail:Boolean(transport),...(demo?{demo:true}:{})});
- if(req.method==="GET" && route==="api/admin/session"){const info=auth.sessionInfo(auth.parseCookie(req.headers.cookie,"aem_admin"));const prefill=config.adminPrefill?{user:config.adminPrefill.split(":")[0]||"",password:config.adminPrefill.split(":").slice(1).join(":")}:null;return json(res,200,{authenticated:Boolean(info),user:info?.user??null,role:info?.role??null,roles:auth.roles,statuses:dossierStatuses,historyActions,...(prefill?{prefill}:{})});}
+ if(req.method==="GET" && route==="api/admin/session"){const info=auth.sessionInfo(auth.parseCookie(req.headers.cookie,"aem_admin"));const prefill=config.adminPrefill?{user:config.adminPrefill.split(":")[0]||"",password:config.adminPrefill.split(":").slice(1).join(":")}:null;return json(res,200,{authenticated:Boolean(info),user:info?.user??null,role:info?.role??null,roles:auth.roles,statuses:dossierStatuses,historyActions,adminNotifyStates,...(prefill?{prefill}:{})});}
  if((!config.standalone && route==="api/chat") || route==="api/assist"){
  const tools={json,readBody:r=>readBody(r,32*1024),clientIp:r=>clientIp(r,config.trustProxy)};
  return route==="api/chat"?chat.handle(req,res,tools):chat.handleAssist(req,res,tools);
@@ -555,7 +584,7 @@ export function createApp(options={}){
  if(!upload.size || !contentType)throw fail(415,"Format ou contenu non accepté : "+upload.name);
  upload.contentType=contentType;
  }
- const updated=await storage.addFiles(meta.id,doc.key,parsed.uploads,{by:session.user,label:doc.label});
+ const updated=await storage.addFiles(meta.id,doc.key,parsed.uploads,{by:session.user,label:doc.label,limits:config.limits});
  const docs=documentsFor(updated.answers||{},receivedAt(updated)).map(d=>({key:d.key,label:d.label,group:d.group,requiredUpload:Boolean(d.requiredUpload),fileCount:(updated.files||[]).filter(f=>f.key===d.key).length,deferred:isDeferred(updated.answers||{},d.key)}));
  return json(res,200,{dossier:{...withWorkflowLabel(updated),expiresAt:expiresAtOf(updated)},documents:docs});
  }catch(e){return json(res,e.status||400,{error:e.message||"Requête invalide."});}
@@ -569,16 +598,49 @@ export function createApp(options={}){
  if(!meta)return json(res,404,{error:"Dossier introuvable."});
  const body=await readJson(req,32*1024);
  const {pieces,message}=requestBody(body,documentsFor(meta.answers||{},receivedAt(meta)));
- // Anti double clic : pas deux demandes à moins de 60 s d'intervalle pour le même dossier.
- const lastRequest=(meta.history||[]).filter(e=>e.action==="request").at(-1);
- if(lastRequest && Date.now()-new Date(lastRequest.at).getTime()<60*1000)return json(res,409,{error:"Une demande vient d’être envoyée pour ce dossier."});
  if(!transport || !config.from)return json(res,503,{error:"Messagerie non configurée : la demande ne peut pas être envoyée au candidat."});
  if(!meta.email)return json(res,400,{error:"Ce dossier ne comporte pas d’adresse e-mail."});
- try{await sendTo(prepareRequestMail(meta,pieces,message,config),meta.email);}
- catch(e){return json(res,502,{error:"L’e-mail n’a pas pu être envoyé au candidat ; le statut du dossier n’a pas été modifié."+(e.status?" "+e.message:"")});}
- const details="Pièces demandées à "+meta.email+" : "+pieces.map(d=>d.label).join(", ")+(message?" — Message : "+message:"");
- const updated=await storage.update(meta.id,{status:"missing_pieces"},{by:session.user,action:"request",details});
- return json(res,200,{dossier:withWorkflowLabel(updated)});
+ if(!isValidEmail(meta.email))return json(res,400,{error:"L’adresse e-mail du dossier est invalide : la demande ne peut pas être envoyée."});
+ if(requestInflight.has(meta.id))return json(res,409,{error:"Une demande est déjà en cours d’envoi pour ce dossier."});
+ const lastRequest=(meta.history||[]).filter(e=>e.action==="request").at(-1);
+ if(lastRequest && Date.now()-new Date(lastRequest.at).getTime()<60*1000)return json(res,409,{error:"Une demande vient d’être envoyée pour ce dossier."});
+ requestInflight.add(meta.id);
+ try{
+  try{await sendTo(prepareRequestMail(meta,pieces,message,config),meta.email);}
+  catch(e){
+   await storage.update(meta.id,{},{by:session.user,action:"request",details:"Échec d’envoi à "+meta.email+" — "+pieces.map(d=>d.label).join(", ")+(message?" — "+message:"")+" : "+(e.message||"erreur SMTP")}).catch(()=>{});
+   return json(res,502,{error:"L’e-mail n’a pas pu être envoyé au candidat ; le statut du dossier n’a pas été modifié."+(e.message?" "+e.message:"")});
+  }
+  const details="Pièces demandées à "+meta.email+" : "+pieces.map(d=>d.label).join(", ")+(message?" — Message : "+message:"");
+  const updated=await storage.update(meta.id,{status:"missing_pieces"},{by:session.user,action:"request",details});
+  return json(res,200,{dossier:{...withWorkflowLabel(updated),expiresAt:expiresAtOf(updated)},ok:true,sent:true});
+ }finally{requestInflight.delete(meta.id);}
+ }catch(e){return json(res,e.status||400,{error:e.message||"Requête invalide."});}
+ }
+ const notifyRetry=route.match(/^api\/admin\/dossiers\/([a-f0-9-]+)\/notification\/retry$/);
+ if(notifyRetry && req.method==="POST"){
+ try{
+  if(readOnly(session,res))return;
+  if(!isSubmissionId(notifyRetry[1]))return json(res,404,{error:"Dossier introuvable."});
+  const meta=await storage.get(notifyRetry[1]);
+  if(!meta)return json(res,404,{error:"Dossier introuvable."});
+  const state=meta.adminNotify||"";
+  if(state==="sent")return json(res,409,{error:"La notification admin a déjà été envoyée pour ce dossier."});
+  if(!["failed","uncertain","pending"].includes(state))return json(res,409,{error:"Aucune reprise de notification n’est nécessaire pour ce dossier."});
+  if(!transport || !config.from || !config.recipient)return json(res,503,{error:"Messagerie non configurée : la notification ne peut pas être renvoyée."});
+  if(notifyInflight.has(meta.id))return json(res,409,{error:"Une notification est déjà en cours d’envoi pour ce dossier."});
+  notifyInflight.add(meta.id);
+  try{
+   await markAdminNotify(meta.id,"sending");
+   try{
+    await sendAdminNotification({submissionId:meta.id,answers:meta.answers||{},uploads:[]});
+    const updated=await markAdminNotify(meta.id,"sent","Notification admin renvoyée à "+config.recipient+" (par "+session.user+")");
+    return json(res,200,{dossier:{...withWorkflowLabel(updated),expiresAt:expiresAtOf(updated)},ok:true,sent:true});
+   }catch(e){
+    const updated=await markAdminNotify(meta.id,"failed","Échec du renvoi de notification admin : "+(e.message||"erreur"));
+    return json(res,502,{error:"La notification n’a pas pu être renvoyée."+(e.message?" "+e.message:""),dossier:{...withWorkflowLabel(updated),expiresAt:expiresAtOf(updated)}});
+   }
+  }finally{notifyInflight.delete(meta.id);}
  }catch(e){return json(res,e.status||400,{error:e.message||"Requête invalide."});}
  }
  const freeMail=route.match(/^api\/admin\/dossiers\/([a-f0-9-]+)\/mail$/);
@@ -590,6 +652,7 @@ export function createApp(options={}){
   if(!meta)return json(res,404,{error:"Dossier introuvable."});
   if(!transport || !config.from)return json(res,503,{error:"Messagerie non configurée : le message ne peut pas être envoyé."});
   if(!meta.email)return json(res,400,{error:"Ce dossier ne comporte pas d’adresse e-mail."});
+  if(!isValidEmail(meta.email))return json(res,400,{error:"L’adresse e-mail du dossier est invalide : le message ne peut pas être envoyé."});
   const body=await readJson(req,32*1024);
   const mailBody=freeMailBody(body);
   const lastMail=(meta.history||[]).filter(e=>e.action==="email_sent").at(-1);
@@ -700,21 +763,33 @@ export function createApp(options={}){
  }
  const audit=auditText(submission.answers,submission.uploads);
  const deferred=deferredDocuments(submission.answers,submission.uploads);
- await storage.save(submission,audit,{incomplete:deferred.length>0,deferredCount:deferred.length});stored=true;
+ await storage.save(submission,audit,{incomplete:deferred.length>0,deferredCount:deferred.length});
  await record(id,{fingerprint,status:"accepted",createdAt:new Date().toISOString(),stored:true});
- let notifyError=null;
+ // À partir d’ici le dossier est accepté pour le candidat : la notification Admin ne doit plus faire échouer la réponse HTTP.
+ stored=true;
  if(transport){
- sendStarted=true;
- try{await sendTo(prepareMail(submission,config,{adminUrl:adminBase,attachments:config.mailAttachments}),config.recipient);}catch(e){notifyError=e;}
+  await markAdminNotify(id,"sending").catch(()=>{});
+  try{
+   await sendAdminNotification(submission);
+   await markAdminNotify(id,"sent","Notification admin envoyée à "+config.recipient);
+  }catch(e){
+   const ambiguous=e.uncertain===true || /^(ETIMEDOUT|ESOCKET|ECONNECTION|ECONNRESET|EENVELOPE)$/i.test(String(e.code||""));
+   await markAdminNotify(
+    id,
+    ambiguous?"uncertain":"failed",
+    (ambiguous?"Résultat de notification admin incertain : ":"Échec notification admin : ")+(e.message||"erreur")
+   ).catch(()=>{});
+  }
+ }else{
+  await markAdminNotify(id,"skipped","Notification admin non configurée").catch(()=>{});
  }
- await acknowledgeCandidate(submission);
+ await acknowledgeCandidate(submission).catch(()=>{});
  await consumeDraft(req);
- if(notifyError)throw notifyError;
  if(config.retentionDays>0)storage.purgeOlderThan(config.retentionDays).catch(()=>{});
  json(res,200,{ok:true,submissionId:id});credit();
  }catch(e){
  const status=e.status||502;
- json(res,status,{ok:false,error:sendStarted && stored?"Le dossier est enregistré mais la notification e-mail a échoué. Consultez l’espace admin ou contactez AEM avec la référence "+id+".":stored?e.message:e.status?e.message:"L’envoi n’a pas pu être préparé. Gardez cet onglet ouvert et réessayez plus tard."});
+ json(res,status,{ok:false,error:e.status?e.message:stored?"Le dossier n’a pas pu être confirmé complètement. Contactez AEM avec la référence "+id+" avant un nouvel envoi.":e.message||"L’envoi n’a pas pu être préparé. Gardez cet onglet ouvert et réessayez plus tard."});
  }finally{active--;if(ownsLock)inflight.delete(id);}
  }
  // Filet global : aucune exception ni rejet d'une requête ne doit arrêter le processus.
@@ -727,6 +802,7 @@ export function createApp(options={}){
  }
  });
  server.requestTimeout=120000;server.headersTimeout=15000;
+ if(storageEnabled && !options.storage)settleInterruptedNotifications();
  // Conservation : alertes J-7/J-3 puis purge au démarrage et une fois par jour ; jamais bloquante.
  const purgesDossiers=storageEnabled && config.retentionDays>0 && !options.storage;
  if(purgesDossiers || draftStorage){

@@ -14,7 +14,8 @@ export const dossierStatuses = {
  archived:"Classé"
 };
 
-export const historyActions = {received:"Réception",status:"Statut",note:"Note interne",request:"Demande de pièce",candidate_mail:"Mail candidat",email_sent:"Mail libre",retention_warning:"Alerte conservation",assign:"Suivi",upload:"Pièce ajoutée au comptoir",delete:"Suppression"};
+export const historyActions = {received:"Réception",status:"Statut",note:"Note interne",request:"Demande de pièce",candidate_mail:"Mail candidat",email_sent:"Mail libre",admin_notify:"Notification admin",retention_warning:"Alerte conservation",assign:"Suivi",upload:"Pièce ajoutée au comptoir",delete:"Suppression"};
+export const adminNotifyStates = {pending:"À envoyer",sending:"Envoi en cours",sent:"Envoyée",failed:"Échec",uncertain:"Résultat incertain",skipped:"Non envoyée"};
 export const DAY_MS=86400000;
 const STALE_AFTER_DAYS=10;
 // Jours écoulés depuis la dernière relance quand le dossier attend toujours des pièces ; null sinon.
@@ -79,6 +80,7 @@ function summary(meta){
   fileCount:meta.files?.length||0,
   incomplete:Boolean(meta.incomplete),
   assignedTo:meta.assignedTo||"",
+  adminNotify:meta.adminNotify||"",
   staleDays:staleDaysOf(meta),
   minor:Boolean(meta.answers?.contactName)
  };
@@ -173,6 +175,7 @@ export function createStorage(dataDir,{files,blobs,blobScope="dossiers"}={}){
    status:"received",
    warning7SentAt:"",
    warning3SentAt:"",
+   adminNotify:"pending",
    adminNote:"",
    incomplete,
    workflow:submission.answers.workflow,
@@ -212,6 +215,7 @@ export function createStorage(dataDir,{files,blobs,blobScope="dossiers"}={}){
   if(patch.status && Object.hasOwn(dossierStatuses,patch.status) && patch.status!==meta.status){meta.status=patch.status;meta.history.push(historyEntry(by,"status","Statut : "+dossierStatuses[patch.status]));}
   if(typeof patch.adminNote==="string" && patch.adminNote.slice(0,4000)!==(meta.adminNote||"")){meta.adminNote=patch.adminNote.slice(0,4000);meta.history.push(historyEntry(by,"note",meta.adminNote?"Note interne mise à jour":"Note interne effacée"));}
   if(["sent","failed","skipped"].includes(patch.candidateMail))meta.candidateMail=patch.candidateMail;
+  if(["pending","sending","sent","failed","uncertain","skipped"].includes(patch.adminNotify))meta.adminNotify=patch.adminNotify;
   if(typeof patch.assignedTo==="string"){
    const who=patch.assignedTo.trim().slice(0,64);
    if(who!==(meta.assignedTo||"")){meta.assignedTo=who;meta.history.push(historyEntry(by,"assign",who?"Suivi par "+who:"Suivi retiré"));}
@@ -227,10 +231,17 @@ export function createStorage(dataDir,{files,blobs,blobScope="dossiers"}={}){
   if(!isSubmissionId(id))return Promise.resolve(null);
   return withLock(id,()=>addFilesUnlocked(id,key,uploads,options));
  }
- async function addFilesUnlocked(id,key,uploads,{by="système",label=""}={}){
+ async function addFilesUnlocked(id,key,uploads,{by="système",label="",limits=null}={}){
   const meta=await readMeta(id);
   if(!meta)return null;
   meta.files||=[];meta.history||=[];
+  if(limits){
+   const maxFiles=Number(limits.fileCount)||0,maxBytes=Number(limits.totalBytes)||0;
+   if(maxFiles>0 && meta.files.length+uploads.length>maxFiles)throw Object.assign(new Error("Ce dossier atteint déjà la limite de "+maxFiles+" fichiers."),{status:413});
+   const existing=meta.files.reduce((n,f)=>n+(Number(f.size)||0),0);
+   const incoming=uploads.reduce((n,f)=>n+(Number(f.size)||0),0);
+   if(maxBytes>0 && existing+incoming>maxBytes)throw Object.assign(new Error("Ce dossier dépasserait la taille totale autorisée pour les pièces."),{status:413});
+  }
   let index=meta.files.reduce((max,f)=>Math.max(max,f.index),-1)+1;
   const taken=new Set((meta.files||[]).map(f=>String(f.displayName||f.name||"").toLowerCase()).filter(Boolean));
   for(const file of uploads){

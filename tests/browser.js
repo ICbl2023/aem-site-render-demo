@@ -181,11 +181,11 @@ try{
  assert.ok(!(await page.locator(".summary-panel").innerText()).includes("AEM vous recontactera"));
  }
  await page.locator("#send-confirm").check();await page.locator("#send-button").click();
- await waitTitle("Votre envoi a été pris en charge");
+ await waitTitle("Votre dossier est bien enregistré");
  const successText=await page.locator("#question-card").innerText();
  const payload=await page.evaluate(()=>window.testPayload);
  const deferredLabels=(a.deferred||[]).map(key=>documentsFor(a).find(d=>d.key===key).label);
- const mail=h.messages.at(-1);assert.equal(mail.subject,subjectFor(a));
+ const mail=h.messages.at(-1);assert.equal(mail.subject,"[AEM Admin] Nouveau dossier — "+subjectFor(a));
  assert.ok(mail.text.includes("Nouveau dossier arrivé dans la zone admin"),"notification sans pièces jointes (AEM_MAIL_ATTACHMENTS=0)");
  assert.equal(mail.text.includes("Pièces à récupérer"),deferredLabels.length>0);
  assert.equal(successText.includes("AEM vous recontactera pour récupérer"),deferredLabels.length>0);

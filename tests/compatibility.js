@@ -92,7 +92,7 @@ try{
  await page.locator("#field-identityExpiry").press("Enter");
  await page.waitForFunction(()=>document.querySelector("h1")?.textContent==="Vérifiez votre récapitulatif");
  await page.locator("#send-confirm").check();await page.locator("#send-button").click();
- await page.waitForFunction(()=>document.querySelector("h1")?.textContent==="Votre envoi a été pris en charge");
+ await page.waitForFunction(()=>document.querySelector("h1")?.textContent==="Votre dossier est bien enregistré");
  const mail=h.messages.at(-1);assert.equal(mail.subject,"[AEM Admin] Nouveau dossier — "+subjectFor(a));
  assert.equal(mail.attachments.length,0,"notification admin sans pièces jointes");
  assert.deepEqual(errors,[]);await page.close();

@@ -66,7 +66,7 @@ test("Accusé de réception candidat : mail reçu par le SMTP labo, état tracé
  assert.ok(h.messages.some(m=>mailTo(m).includes("admin@example.test")),"la notification AEM est conservée");
  const meta=JSON.parse(await readFile(h.dataDir+"/"+id+"/meta.json","utf8"));
  assert.equal(meta.candidateMail,"sent");
- assert.deepEqual(meta.history.map(e=>e.action),["received","candidate_mail"]);
+ assert.deepEqual(meta.history.map(e=>e.action),["received","admin_notify","candidate_mail"]);
  assert.equal(meta.history[0].by,"système");
  }finally{await h.close();}
 });
@@ -117,9 +117,9 @@ test("Demande de pièce : validation, mail candidat, statut missing_pieces, hist
  assert.equal(r.status,200);
  const {dossier}=await r.json();
  assert.equal(dossier.status,"missing_pieces");
- assert.deepEqual(dossier.history.map(e=>e.action),["received","request","status"]);
- assert.equal(dossier.history[1].by,"admin");
- assert.ok(dossier.history[1].details.includes(identityLabel) && dossier.history[1].details.includes("Le recto"));
+ assert.deepEqual(dossier.history.map(e=>e.action),["received","admin_notify","request","status"]);
+ assert.equal(dossier.history[2].by,"admin");
+ assert.ok(dossier.history[2].details.includes(identityLabel) && dossier.history[2].details.includes("Le recto"));
  assert.equal(h.messages.length,before+1);
  const mail=h.messages.at(-1);
  assert.deepEqual(mailTo(mail),["nolan@example.test"]);
@@ -127,11 +127,11 @@ test("Demande de pièce : validation, mail candidat, statut missing_pieces, hist
  for(const part of ["Bonjour Nolan,","- "+identityLabel,"- JDC ou avis de situation","Message d’AEM :\nLe recto de votre CNI est illisible.","Référence complète : "+id,"04 78 31 79 85"])assert.ok(mail.text.includes(part),"contenu attendu : "+part);
  r=await fetch(h.url+"/api/admin/dossiers/"+id,{headers:{Cookie:cookie}});
  const detail=await r.json();
- assert.equal(detail.dossier.status,"missing_pieces");assert.equal(detail.dossier.history.length,3);
+ assert.equal(detail.dossier.status,"missing_pieces");assert.equal(detail.dossier.history.length,4);
  assert.ok(detail.documents.some(d=>d.key==="identity_cni_fr" && d.fileCount===1));
  r=await fetch(h.url+"/api/admin/dossiers/"+id,{method:"PATCH",headers,body:JSON.stringify({status:"in_progress",adminNote:"Relance faite"})});
  const patched=(await r.json()).dossier;
- assert.deepEqual(patched.history.slice(3).map(e=>[e.by,e.action]),[["admin","status"],["admin","note"]]);
+ assert.deepEqual(patched.history.slice(4).map(e=>[e.by,e.action]),[["admin","status"],["admin","note"]]);
  }finally{await h.close();}
 });
 
@@ -229,7 +229,7 @@ test("Demande de pièce : 502 si le mail échoue (statut inchangé), 503 sans me
  const r=await fetch(h.url+"/api/admin/dossiers/"+id+"/request",{method:"POST",headers:{...jsonHeaders,Cookie:cookie},body:JSON.stringify({pieces:["identity_cni_fr"]})});
  assert.equal(r.status,502);
  const meta=JSON.parse(await readFile(dataDir+"/"+id+"/meta.json","utf8"));
- assert.equal(meta.status,"received");assert.equal(meta.history.length,1);
+ assert.equal(meta.status,"received");assert.equal(meta.history.length,3);assert.ok(meta.history.some(e=>e.action==="request" && /echec|échec|SMTP/i.test(e.details)));assert.equal(meta.adminNotify,"sent");
  }finally{await new Promise(r=>app.close(r));}
  app=createApp({config:{origin:"http://test",smtpHost:"",from:"",recipient:"",receiptDir:"test-results/req-r2-"+suffix,dataDir,adminPassword:"test-admin"}});
  await new Promise(r=>app.listen(0,"127.0.0.1",r));

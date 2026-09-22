@@ -121,13 +121,17 @@ test("Pas de faux succès si SMTP absent",async()=>{
  try{const r=await fetch("http://127.0.0.1:"+app.address().port+"/api/submit",{method:"POST",body:form()});assert.equal(r.status,503);}
  finally{await new Promise(r=>app.close(r));}
 });
-test("Échec SMTP : dossier stocké, notification refusée, référence conservée",async()=>{
+test("Échec SMTP : dossier stocké, soumission 200, adminNotify failed, reprise sans doublon",async()=>{
  const dataDir="test-results/failure-"+crypto.randomUUID();
  const app=createApp({config:{origin:"http://test",from:"aem@example.test",recipient:"admin@example.test",receiptDir:"test-results/failure-r-"+crypto.randomUUID(),dataDir},transport:{async sendMail(){throw new Error("SMTP failure");}}});
  await new Promise(r=>app.listen(0,"127.0.0.1",r));const h={url:"http://127.0.0.1:"+app.address().port,origin:"http://test"},id=crypto.randomUUID();
  try{
- let r=await send(h,form(candidate,attachmentsFor(candidate),id));assert.equal(r.status,502);assert.equal((await r.json()).ok,false);
+ let r=await send(h,form(candidate,attachmentsFor(candidate),id));assert.equal(r.status,200);assert.equal((await r.json()).ok,true);
+ const {readFile}=await import("node:fs/promises");
+ const meta=JSON.parse(await readFile(dataDir+"/"+id+"/meta.json","utf8"));
+ assert.equal(meta.adminNotify,"failed");
  r=await send(h,form(candidate,attachmentsFor(candidate),id));assert.equal(r.status,200);
+ assert.equal(JSON.parse(await readFile(dataDir+"/"+id+"/meta.json","utf8")).adminNotify,"failed","pas de nouveau dossier ni renvoi auto");
  }finally{await new Promise(r=>app.close(r));}
 });
 test("Sécurité admin : UUID invalide et patch restreint",async()=>{

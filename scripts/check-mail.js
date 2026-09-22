@@ -1,6 +1,6 @@
 import {config} from "../server-config.js";
 import {createMailTransport} from "../server.js";
-const required=[["SMTP_HOST",config.smtpHost],["AEM_FROM",config.from],["AEM_ORIGIN ou RENDER_EXTERNAL_URL",config.origin]];
+const required=[["SMTP_HOST",config.smtpHost],["AEM_FROM",config.from],["AEM_RECIPIENT",config.recipient],["AEM_ORIGIN ou RENDER_EXTERNAL_URL",config.origin]];
 if(config.smtpUser)required.push(["SMTP_PASS",config.smtpPass]);
 const missing=required.filter(([,value])=>!value).map(([name])=>name);
 if(missing.length){

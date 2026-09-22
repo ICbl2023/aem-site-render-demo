@@ -6,13 +6,15 @@ const listEmpty=$("#list-empty"),listEmptyText=listEmpty.textContent;
 const statusFilter=$("#status-filter"),workflowFilter=$("#workflow-filter"),searchInput=$("#search-input"),filterNote=$("#filter-note");
 const userLabel=$("#admin-user-label"),serviceSettings=$("#service-settings"),serviceStatus=$("#service-status"),queue=$("#admin-queue"),summaryLine=$("#admin-summary"),layout=$("#admin-layout");
 const candidateMailLabels={sent:"envoyé",failed:"échec d’envoi",skipped:"non envoyé"};
+const adminNotifyLabels={pending:"à envoyer",sending:"envoi en cours",sent:"envoyée",failed:"échec",uncertain:"résultat incertain",skipped:"non envoyée"};
 const groupLabels={identity:"Identité",age:"Justificatifs liés à l’âge",home:"Domicile",europeResidence:"Situation Europe",permit:"Permis",special:"Compléments",medical:"Compléments"};
 const queueMore=$("#admin-queue-more");
 const refreshWarning="Modification enregistrée, mais l’affichage n’a pas pu être actualisé : ";
 const ACCEPT=".jpg,.jpeg,.png,.webp,.heic,.heif,.pdf";
 const STALE_DAYS=10,POLL_MS=60*1000;
+const pendingDossierFromUrl=()=>{try{const id=new URLSearchParams(location.search).get("dossier");return /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(id||"")?id:null;}catch{return null;}};
 // Libellés (statuts, historique, rôles) fournis par le serveur : source unique.
-let statuses={},historyActions={},roles={},items=[],selectedId=null,listSeq=0,session={user:"",role:""},clientQueue="",lastReceived=null,pollTimer=0;
+let statuses={},historyActions={},adminNotifyStates={},roles={},items=[],selectedId=null,listSeq=0,session={user:"",role:""},clientQueue="",lastReceived=null,pollTimer=0,pendingDossier=pendingDossierFromUrl();
 const previews=new Set();
 
 const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;};
@@ -53,7 +55,7 @@ function expireSession(message){leavePanel();showError(loginError,message+" Reco
 
 async function ensureSession(){
  const data=await api("session",{method:"GET"});
- statuses=data.statuses||{};historyActions=data.historyActions||{};roles=data.roles||{};
+ statuses=data.statuses||{};historyActions=data.historyActions||{};adminNotifyStates=data.adminNotifyStates||adminNotifyLabels;roles=data.roles||{};
  statusFilter.replaceChildren(
  Object.assign(el("option","","En cours de traitement"),{value:""}),
  ...Object.entries(statuses).filter(([v])=>v!=="archived").map(([value,label])=>Object.assign(el("option","",label),{value})),
@@ -72,6 +74,11 @@ async function showPanel(info){
  await Promise.all([loadStats(),session.role==="responsable"?loadStatus():Promise.resolve()]);
  applyQueue("received");
  startPolling();
+ if(pendingDossier){
+  const id=pendingDossier;pendingDossier=null;
+  try{history.replaceState({},"",location.pathname+(location.hash||""));}catch{}
+  await openDossier(id).catch(e=>{if(e?.status!==401)showError(detailError,e.message||"Dossier introuvable.");});
+ }
 }
 
 /* ---------- File de travail ---------- */
@@ -185,6 +192,7 @@ function renderDossier(dossier,documents){
  summary.append(el("li","",deferred.length?"Pièces à récupérer : "+deferred.map(d=>d.label).join(", "):"Pièces à récupérer : aucune"));
  detailContent.append(summary);
  const meta=[ "Reçu le "+fmtDate(dossier.createdAt), "Réf. "+dossier.id.slice(0,8), "Accusé candidat : "+(candidateMailLabels[dossier.candidateMail]||"non envoyé")];
+ if(dossier.adminNotify)meta.push("Notification admin : "+(adminNotifyStates[dossier.adminNotify]||adminNotifyLabels[dossier.adminNotify]||dossier.adminNotify));
  if(dossier.expiresAt)meta.push("Sera effacé le "+fmtDay(dossier.expiresAt));
  if(dossier.finalizedAt)meta.push("Finalisé le "+fmtDay(dossier.finalizedAt));
  detailContent.append(el("p","validation-hint",meta.join(" · ")));
@@ -208,6 +216,7 @@ function renderDossier(dossier,documents){
  detailContent.append(tools);
  if(canWrite()){
  detailContent.append(actionsBlock(dossier));
+ const notify=notifyBlock(dossier);if(notify)detailContent.append(notify);
  detailContent.append(requestBlock(dossier,documents));
  detailContent.append(mailBlock(dossier));
  detailContent.append(deleteBlock(dossier));
@@ -314,20 +323,25 @@ function checklist(dossier,documents){
  const input=el("input");input.type="file";input.multiple=true;input.accept=ACCEPT;input.setAttribute("aria-label","Ajouter une pièce reçue au comptoir pour "+doc.label);
  const text=el("span","",files.length?"Ajouter un autre fichier reçu au comptoir":"Ajouter une pièce reçue au comptoir (ou glisser-déposer)");
  const error=el("p","field-error");error.hidden=true;error.setAttribute("role","alert");
+ let uploading=false;
+ const idleLabel=files.length?"Ajouter un autre fichier reçu au comptoir (ou glisser-déposer)":"Ajouter une pièce reçue au comptoir (ou glisser-déposer PDF, JPG, PNG, WEBP, HEIC)";
+ text.textContent=idleLabel;
  const sendFiles=async fileList=>{
-  if(!fileList?.length)return;
-  const body=new FormData();body.append("key",doc.key);for(const f of fileList)body.append("files",f,f.name);
-  input.disabled=true;text.textContent="Envoi en cours…";error.hidden=true;add.classList.remove("is-dragover");
+  if(uploading)return;
+  const list=fileList?Array.from(fileList):[];
+  if(!list.length){showError(error,"Aucun fichier exploitable déposé. Formats acceptés : PDF, JPG, PNG, WEBP, HEIC.");return;}
+  const body=new FormData();body.append("key",doc.key);for(const f of list)body.append("files",f,f.name);
+  uploading=true;input.disabled=true;text.textContent="Envoi en cours…";error.hidden=true;add.classList.remove("is-dragover");
   try{await api("dossiers/"+dossier.id+"/files",{method:"POST",body});}
-  catch(e){showError(error,e.message);input.disabled=false;text.textContent="Ajouter une pièce reçue au comptoir (ou glisser-déposer)";return;}
+  catch(e){showError(error,e.message);uploading=false;input.disabled=false;text.textContent=idleLabel;return;}
   await loadStats();await openDossier(dossier.id,refreshWarning);
  };
  input.addEventListener("change",async()=>{await sendFiles(input.files);input.value="";});
- add.addEventListener("dragenter",e=>{e.preventDefault();add.classList.add("is-dragover");});
- add.addEventListener("dragover",e=>{e.preventDefault();e.dataTransfer.dropEffect="copy";add.classList.add("is-dragover");});
- add.addEventListener("dragleave",()=>add.classList.remove("is-dragover"));
+ add.addEventListener("dragenter",e=>{e.preventDefault();e.stopPropagation();if(!uploading)add.classList.add("is-dragover");});
+ add.addEventListener("dragover",e=>{e.preventDefault();e.stopPropagation();e.dataTransfer.dropEffect="copy";if(!uploading)add.classList.add("is-dragover");});
+ add.addEventListener("dragleave",e=>{if(!add.contains(e.relatedTarget))add.classList.remove("is-dragover");});
  add.addEventListener("drop",async e=>{
-  e.preventDefault();add.classList.remove("is-dragover");
+  e.preventDefault();e.stopPropagation();add.classList.remove("is-dragover");
   await sendFiles(e.dataTransfer?.files);
  });
  add.append(input,text);row.append(add,error);
@@ -381,6 +395,26 @@ function deleteBlock(dossier){
  return block;
 }
 
+function notifyBlock(dossier){
+ const state=dossier.adminNotify||"";
+ if(!["failed","uncertain","pending"].includes(state))return null;
+ const block=el("section","admin-notify");
+ block.append(el("h3","","Notification « nouveau dossier »"));
+ block.append(el("p","","État : "+(adminNotifyStates[state]||adminNotifyLabels[state]||state)+". Le dossier est bien enregistré. Vous pouvez renvoyer la notification à l’adresse admin configurée."));
+ const error=el("p","field-error");error.hidden=true;error.setAttribute("role","alert");
+ const ok=el("p","validation-hint");ok.hidden=true;
+ const button=el("button","next-button","Renvoyer la notification");button.type="button";
+ button.addEventListener("click",async()=>{
+  error.hidden=true;ok.hidden=true;button.disabled=true;
+  try{await api("dossiers/"+dossier.id+"/notification/retry",{method:"POST",body:"{}"});}
+  catch(e){showError(error,e.message);button.disabled=false;return;}
+  ok.textContent="Notification renvoyée.";ok.hidden=false;
+  await loadStats();await openDossier(dossier.id,refreshWarning);
+ });
+ block.append(error,ok,button);
+ return block;
+}
+
 function requestBlock(dossier,documents){
  const block=el("section","admin-request");
  block.append(el("h3","","Demander une pièce au candidat"));
@@ -398,22 +432,25 @@ function requestBlock(dossier,documents){
  const messageLabel=el("label","field-label","Message pour le candidat");messageLabel.htmlFor="request-message";
  const message=el("textarea");message.id="request-message";message.maxLength=2000;message.rows=4;
  const error=el("p","field-error");error.hidden=true;error.setAttribute("role","alert");
- const button=el("button","next-button","Envoyer la demande");button.type="button";button.disabled=!documents.length;
+ const ok=el("p","validation-hint");ok.hidden=true;
+ const button=el("button","next-button","Envoyer la demande");button.type="button";button.disabled=!documents.length||!dossier.email;
  button.addEventListener("click",async()=>{
- error.hidden=true;
+ error.hidden=true;ok.hidden=true;
  const pieces=boxes.filter(b=>b.checked).map(b=>b.value);
  if(!pieces.length){error.textContent="Cochez au moins une pièce à demander.";error.hidden=false;return;}
+ if(!dossier.email){error.textContent="Ce dossier n’a pas d’adresse e-mail.";error.hidden=false;return;}
  button.disabled=true;
  try{await api("dossiers/"+dossier.id+"/request",{method:"POST",body:JSON.stringify({pieces,message:message.value})});}
  catch(e){showError(error,e.message);button.disabled=false;return;}
+ ok.textContent="Demande envoyée au candidat.";ok.hidden=false;
  await loadStats();await openDossier(dossier.id,refreshWarning);
  });
- block.append(messageLabel,message,error,button);
+ block.append(messageLabel,message,error,ok,button);
  return block;
 }
 
 function mailBlock(dossier){
- const block=el("section","admin-request");
+ const block=el("section","admin-free-mail");
  block.append(el("h3","","Envoyer un message au candidat"));
  block.append(el("p","","Destinataire : "+(dossier.email||"—")+" (adresse du dossier). Objet et message libres."));
  const subjectLabel=el("label","field-label","Objet");subjectLabel.htmlFor="free-mail-subject";
@@ -421,16 +458,18 @@ function mailBlock(dossier){
  const messageLabel=el("label","field-label","Message");messageLabel.htmlFor="free-mail-message";
  const message=el("textarea");message.id="free-mail-message";message.maxLength=4000;message.rows=5;message.required=true;
  const error=el("p","field-error");error.hidden=true;error.setAttribute("role","alert");
+ const ok=el("p","validation-hint");ok.hidden=true;
  const button=el("button","next-button","Envoyer le message");button.type="button";button.disabled=!dossier.email;
  button.addEventListener("click",async()=>{
-  error.hidden=true;
+  error.hidden=true;ok.hidden=true;
   if(!subject.value.trim() || !message.value.trim()){error.textContent="Renseignez l’objet et le message.";error.hidden=false;return;}
   button.disabled=true;
   try{await api("dossiers/"+dossier.id+"/mail",{method:"POST",body:JSON.stringify({subject:subject.value,message:message.value})});}
   catch(e){showError(error,e.message);button.disabled=false;return;}
+  ok.textContent="Message envoyé au candidat.";ok.hidden=false;
   await loadStats();await openDossier(dossier.id,refreshWarning);
  });
- block.append(subjectLabel,subject,messageLabel,message,error,button);
+ block.append(subjectLabel,subject,messageLabel,message,error,ok,button);
  return block;
 }
 

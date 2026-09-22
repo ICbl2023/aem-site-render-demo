@@ -396,8 +396,8 @@ async function submit(){
  const deferred=deferredDocuments(clean,fileMetadata()); // avant files.clear() : les fichiers présents annulent le report
  completed=true;await drafts.confirmed(submissionId);files.clear();draftMissing=[];releasePreviews();card.replaceChildren();
  const done=el("div","summary-content");const badge=el("div","success-badge");badge.append(icon("check",28));done.append(badge);
- const h=el("h1","","Votre envoi a été pris en charge");h.tabIndex=-1;done.append(h);
- done.append(el("p","lead","Votre dossier a été enregistré par AEM. L’administration vérifiera vos documents et vous recontactera si nécessaire."));
+ const h=el("h1","","Votre dossier est bien enregistré");h.tabIndex=-1;done.append(h);
+ done.append(el("p","lead","Votre dossier a bien été enregistré par l’Auto-école Majolane. Vous n’avez pas à recommencer ni à renvoyer ce dossier. AEM vérifiera vos documents et vous recontactera si nécessaire."));
  done.append(el("p","validation-hint","Référence : "+result.submissionId));
  if(deferred.length)done.append(el("p","validation-hint","AEM vous recontactera pour récupérer : "+deferred.map(d=>d.label).join(", ")+"."));
  celebrate("Dossier transmis !");
