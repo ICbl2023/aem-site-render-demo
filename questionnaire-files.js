@@ -6,6 +6,6 @@ export const questionnairePublicFiles=[
  "mentions-legales.html","confidentialite.html","admin.html","admin.css","admin.js"
 ];
 export const questionnaireServerFiles=[
- "server.js","server-config.js","email-transport.js","questionnaire-files.js","questionnaire-server.js",
+ "server.js","server-config.js","email-transport.js","export-names.js","questionnaire-files.js","questionnaire-server.js",
  "storage.js","draft-storage.js","blob-store.js","retention.js","admin-auth.js","chat-server.js","demo.js","demo.css","scripts/check-mail.js"
 ];

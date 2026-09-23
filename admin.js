@@ -25,6 +25,65 @@ const canWrite=()=>session.role!=="lecture";
 const ageFrom=birthDate=>{if(!/^\d{4}-\d{2}-\d{2}$/.test(birthDate||""))return null;const b=new Date(birthDate),n=new Date();let age=n.getFullYear()-b.getFullYear();const m=n.getMonth()-b.getMonth();if(m<0 || (m===0 && n.getDate()<b.getDate()))age--;return age;};
 const frDate=v=>/^\d{4}-\d{2}-\d{2}$/.test(v||"")?v.split("-").reverse().join("/"):(v||"—");
 const releasePreviews=()=>{for(const url of previews)URL.revokeObjectURL(url);previews.clear();};
+let outboundDrag=false;
+const FACE_OPTIONS=[["","À qualifier"],["recto","Recto"],["verso","Verso"],["both","Recto et verso"]];
+const exportInfoFor=(dossier,file)=>{
+ const list=dossier.exportFiles||[];
+ return list.find(x=>x.index===file.index)||null;
+};
+const absoluteFileUrl=(dossierId,index,download=true)=>{
+ const rel="./api/admin/dossiers/"+dossierId+"/files/"+index+(download?"?download=1":"");
+ try{return new URL(rel,location.href).href;}catch{return rel;}
+};
+const revokeLater=(url,ms=120000)=>{if(!url||!String(url).startsWith("blob:"))return;setTimeout(()=>{try{URL.revokeObjectURL(url);}catch{}previews.delete(url);},ms);};
+
+async function writeFilesToDirectory(dirHandle,folderName,filesPayload,{onConflict}={}){
+ let target=dirHandle;
+ let usedName=folderName;
+ try{
+  target=await dirHandle.getDirectoryHandle(folderName,{create:false});
+  const choice=onConflict?await onConflict(folderName):"suffix";
+  if(choice==="cancel")return {cancelled:true};
+  if(choice==="suffix"){
+   let n=2;
+   while(true){
+    usedName=folderName+" ("+n+")";
+    try{await dirHandle.getDirectoryHandle(usedName,{create:false});n++;}
+    catch{break;}
+   }
+   target=await dirHandle.getDirectoryHandle(usedName,{create:true});
+  }else{
+   // compléter sans écraser
+   usedName=folderName;
+  }
+ }catch{
+  target=await dirHandle.getDirectoryHandle(folderName,{create:true});
+ }
+ const written=[];
+ const failed=[];
+ for(const item of filesPayload){
+  try{
+   let name=item.exportName;
+   try{
+    await target.getFileHandle(name,{create:false});
+    let n=2,stem=name.replace(/\.[^.]+$/,""),ext=(name.match(/(\.[^.]+)$/)||[])[1]||"";
+    while(true){
+     const candidate=stem+" ("+n+")"+ext;
+     try{await target.getFileHandle(candidate,{create:false});n++;}
+     catch{name=candidate;break;}
+    }
+   }catch{/* libre */}
+   const fh=await target.getFileHandle(name,{create:true});
+   const w=await fh.createWritable();
+   await w.write(item.blob);
+   await w.close();
+   written.push(name);
+  }catch(e){
+   failed.push({name:item.exportName,error:e.message||"écriture impossible"});
+  }
+ }
+ return {cancelled:false,folderName:usedName,written,failed};
+}
 
 // Les en-têtes passés par l'appelant complètent ceux par défaut ; un FormData part sans Content-Type JSON.
 const api=async(path,options={})=>{
@@ -213,7 +272,75 @@ function renderDossier(dossier,documents){
  detailContent.append(audit);
  const tools=el("div","admin-tools");
  const print=el("a","next-button","Fiche à imprimer");print.href="./api/admin/dossiers/"+dossier.id+"/export";print.target="_blank";print.rel="noopener";tools.append(print);
- detailContent.append(tools);
+ const zip=el("a","secondary-button","Télécharger le dossier ZIP");
+ zip.href="./api/admin/dossiers/"+dossier.id+"/archive.zip";
+ zip.setAttribute("download",(dossier.exportFolderName||"dossier")+".zip");
+ tools.append(zip);
+ const folderBtn=el("button","secondary-button","Créer le dossier sur mon ordinateur");
+ folderBtn.type="button";
+ const exportStatus=el("p","admin-export-status");exportStatus.hidden=true;exportStatus.setAttribute("role","status");
+ const exportError=el("p","field-error");exportError.hidden=true;exportError.setAttribute("role","alert");
+ folderBtn.addEventListener("click",async()=>{
+  exportError.hidden=true;exportStatus.hidden=true;
+  if(typeof window.showDirectoryPicker!=="function"){
+   showError(exportError,"Votre navigateur ne permet pas de créer un dossier local directement. Utilisez « Télécharger le dossier ZIP », puis extrayez-le dans l’Explorateur.");
+   return;
+  }
+  const files=dossier.files||[];
+  if(!files.length){showError(exportError,"Aucun document à exporter pour ce dossier.");return;}
+  let parent;
+  try{parent=await window.showDirectoryPicker({mode:"readwrite"});}
+  catch(e){
+   if(e && (e.name==="AbortError" || e.name==="NotAllowedError")){exportStatus.hidden=false;exportStatus.textContent="Création annulée.";return;}
+   showError(exportError,e.message||"Sélection du dossier impossible.");
+   return;
+  }
+  folderBtn.disabled=true;
+  exportStatus.hidden=false;exportStatus.textContent="Préparation des fichiers…";
+  const payload=[];
+  const prepFailed=[];
+  for(const file of files){
+   const exp=exportInfoFor(dossier,file);
+   const exportName=exp?.exportName||file.displayName||file.name||("fichier-"+file.index);
+   try{
+    const r=await fetch("./api/admin/dossiers/"+dossier.id+"/files/"+file.index+"?download=1",{credentials:"same-origin"});
+    if(!r.ok){prepFailed.push(exportName);continue;}
+    payload.push({exportName,blob:await r.blob()});
+   }catch{prepFailed.push(exportName);}
+  }
+  if(!payload.length){
+   folderBtn.disabled=false;
+   showError(exportError,"Aucun fichier n’a pu être lu depuis le serveur."+(prepFailed.length?" Échecs : "+prepFailed.join(", "):""));
+   return;
+  }
+  const folderName=dossier.exportFolderName||"Dossier candidat";
+  exportStatus.textContent="Écriture dans le dossier choisi…";
+  try{
+   const result=await writeFilesToDirectory(parent,folderName,payload,{
+    onConflict:async name=>{
+     const ok=window.confirm("Le dossier « "+name+" » existe déjà.\nOK = compléter sans écraser les fichiers homonymes.\nAnnuler = créer un dossier avec un suffixe (2), (3)…");
+     return ok?"merge":"suffix";
+    }
+   });
+   if(result.cancelled){exportStatus.textContent="Création annulée.";folderBtn.disabled=false;return;}
+   const parts=["Dossier « "+result.folderName+" » : "+result.written.length+" document(s) enregistré(s)."];
+   if(result.failed.length)parts.push("Échecs : "+result.failed.map(f=>f.name).join(", ")+".");
+   if(prepFailed.length)parts.push("Non lus sur le serveur : "+prepFailed.join(", ")+".");
+   if(result.failed.length || prepFailed.length){
+    exportStatus.textContent="Export partiel — "+parts.join(" ");
+   }else{
+    exportStatus.textContent="Export terminé — "+parts.join(" ");
+   }
+  }catch(e){
+   showError(exportError,e.message||"Écriture locale impossible.");
+  }
+  folderBtn.disabled=false;
+ });
+ tools.append(folderBtn);
+ detailContent.append(tools,exportStatus,exportError);
+ const tip=el("p","validation-hint admin-export-tip");
+ tip.textContent="Glisser-déposer vers Windows : utilisez la poignée ⋮⋮ à gauche de chaque document (Chrome/Edge). Cela copie le fichier ; le dossier AEM n’est jamais modifié. Si le geste n’est pas pris en charge, utilisez Télécharger ou le ZIP.";
+ detailContent.append(tip);
  if(canWrite()){
  detailContent.append(actionsBlock(dossier));
  const notify=notifyBlock(dossier);if(notify)detailContent.append(notify);
@@ -288,16 +415,52 @@ function checklist(dossier,documents){
  const list=el("ul","admin-files");
  for(const file of files){
  const li=el("li");
+ const exp=exportInfoFor(dossier,file);
+ const exportName=exp?.exportName||file.displayName||file.name||"document";
  const href="./api/admin/dossiers/"+dossier.id+"/files/"+file.index;
  if(/^image\//.test(file.contentType) && !/hei[cf]/.test(file.contentType)){
  const thumb=el("a","admin-thumb");thumb.href=href;thumb.target="_blank";thumb.rel="noopener";
  const img=el("img");img.alt="Aperçu de "+(file.displayName||file.name);thumb.append(img);li.append(thumb);
  fetch(href,{credentials:"same-origin"}).then(r=>r.ok?r.blob():null).then(b=>{if(b){const url=URL.createObjectURL(b);previews.add(url);img.src=url;}}).catch(()=>{});
  }
- const info=el("span");info.append(el("strong","",file.displayName||file.name),el("small","",(file.originalName && file.originalName!==(file.displayName||file.name)?"fichier reçu : "+file.originalName+" · ":"")+file.contentType+" · "+Math.round(file.size/1024)+" Ko"+(file.source==="comptoir"?" · ajouté au comptoir"+(file.addedBy?" par "+file.addedBy:""):"")));
- const links=el("span");
+ const handle=el("span","admin-drag-handle");
+ handle.draggable=true;
+ handle.title="Glisser vers l’Explorateur Windows (copie)";
+ handle.setAttribute("aria-label","Glisser "+exportName+" vers un dossier Windows");
+ handle.textContent="⋮⋮";
+ let prefetchBlob=null,prefetchUrl="";
+ handle.addEventListener("pointerdown",()=>{
+  prefetchBlob=null;prefetchUrl="";
+  fetch(href+"?download=1",{credentials:"same-origin"}).then(r=>r.ok?r.blob():null).then(b=>{
+   if(!b)return;
+   prefetchBlob=b;
+   prefetchUrl=URL.createObjectURL(b);
+   previews.add(prefetchUrl);
+  }).catch(()=>{});
+ });
+ handle.addEventListener("dragstart",e=>{
+  outboundDrag=true;
+  e.stopPropagation();
+  try{e.dataTransfer.effectAllowed="copy";}catch{}
+  const mime=file.contentType||"application/octet-stream";
+  const safeName=String(exportName).replace(/:/g,"-");
+  const abs=absoluteFileUrl(dossier.id,file.index,true);
+  const urlForDrag=prefetchUrl||abs;
+  // DownloadURL Chromium/Edge : un seul enregistrement (blob préchargé si prêt, sinon URL Admin same-origin).
+  try{e.dataTransfer.setData("DownloadURL",mime+":"+safeName+":"+urlForDrag);}catch{}
+  try{e.dataTransfer.setData("text/plain",safeName);}catch{}
+  if(prefetchUrl)revokeLater(prefetchUrl,180000);
+  handle.classList.add("is-dragging");
+ });
+ handle.addEventListener("dragend",()=>{outboundDrag=false;handle.classList.remove("is-dragging");});
+ const info=el("span","admin-file-info");
+ info.append(el("strong","",file.displayName||file.name));
+ info.append(el("small","","Export : "+exportName));
+ if(exp?.needsFace && !exp.face)info.append(el("small","admin-face-warn","Face à qualifier (recto / verso / les deux) avant un code CI1/CI2/CI0."));
+ info.append(el("small","",(file.originalName && file.originalName!==(file.displayName||file.name)?"fichier reçu : "+file.originalName+" · ":"")+file.contentType+" · "+Math.round(file.size/1024)+" Ko"+(file.source==="comptoir"?" · ajouté au comptoir"+(file.addedBy?" par "+file.addedBy:""):"")));
+ const links=el("span","admin-file-actions");
  const open=el("a","","Ouvrir");open.href=href;open.target="_blank";open.rel="noopener";
- const download=el("a","","Télécharger");download.href=href+"?download=1";
+ const download=el("a","","Télécharger");download.href=href+"?download=1";download.setAttribute("download",exportName);
  links.append(open," · ",download);
  if(canWrite()){
   const rename=el("button","admin-link-button","Renommer");rename.type="button";
@@ -314,7 +477,23 @@ function checklist(dossier,documents){
   });
   links.append(" · ",rename);
  }
- li.append(info,links);list.append(li);
+ if(canWrite() && exp?.needsFace){
+  const faceLabel=el("label","admin-face-label","Face");
+  const faceSel=el("select","admin-face-select");
+  faceSel.setAttribute("aria-label","Qualification recto/verso pour "+(file.displayName||file.name));
+  for(const [value,label] of FACE_OPTIONS){
+   const opt=el("option","",label);opt.value=value;if((file.face||"")===value)opt.selected=true;faceSel.append(opt);
+  }
+  faceSel.addEventListener("change",async()=>{
+   faceSel.disabled=true;
+   try{await api("dossiers/"+dossier.id+"/files/"+file.index,{method:"PATCH",body:JSON.stringify({face:faceSel.value})});}
+   catch(e){window.alert(e.message||"Qualification impossible.");faceSel.disabled=false;return;}
+   await loadStats();await openDossier(dossier.id,refreshWarning);
+  });
+  faceLabel.append(faceSel);
+  links.append(" · ",faceLabel);
+ }
+ li.append(handle,info,links);list.append(li);
  }
  row.append(list);
  }
@@ -338,6 +517,7 @@ function checklist(dossier,documents){
  status.textContent=idleStatus;status.hidden=false;
  const clearDrag=()=>{dragDepth=0;zone.classList.remove("is-dragover");};
  const isFileDrag=dt=>{
+  if(outboundDrag)return false;
   if(!dt)return false;
   const types=dt.types?Array.from(dt.types):[];
   if(types.includes("Files") || types.includes("application/x-moz-file"))return true;

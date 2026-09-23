@@ -7,8 +7,10 @@ import {fileURLToPath} from "node:url";
 import {createHash} from "node:crypto";
 import Busboy from "busboy";
 import {config as defaultConfig} from "./server-config.js";
-import {cleanAnswers,answerErrors,documentsFor,auditText,subjectFor,acceptedExtensions,missingRequiredDocuments,deferredDocuments,isDeferred,workflows} from "./logic.js";
+import {cleanAnswers,answerErrors,documentsFor,adminDocumentLabel,auditText,acceptedExtensions,missingRequiredDocuments,deferredDocuments,isDeferred,workflows} from "./logic.js";
 import {createStorage,dossierStatuses,historyActions,adminNotifyStates,isSubmissionId,STALE_AFTER_DAYS,fileDownloadName} from "./storage.js";
+import {exportNamesForDossier,personFolderName,zipArchiveFileName,sanitizeWindowsBase} from "./export-names.js";
+import {zipSync} from "fflate";
 import {expiresAtFrom,freeMailBody,prepareFreeMail,runRetentionMaintenance} from "./retention.js";
 import {createDraftStorage,parseDraftToken,DRAFT_ANSWER_BYTES} from "./draft-storage.js";
 import {createBlobStoreFromConfig} from "./blob-store.js";
@@ -209,22 +211,42 @@ function validatedSubmission(fields,uploads,limits){
  if(total>limits.totalBytes)throw fail(413,"L’ensemble des fichiers dépasse la limite d’envoi.");
  return {answers,uploads,submissionId:payload.submissionId};
 }
-export function prepareMail(submission,config,{adminUrl=null,attachments=false}={}){
+export function prepareMail(submission,config,{adminUrl=null,adminHomeUrl=null,attachments=false}={}){
  const audit=auditText(submission.answers,submission.uploads);
- const link=adminUrl||config.adminUrl||"";
- const adminLine=link?"\n\nOuvrir le dossier dans la zone admin : "+link:"\n\nOuvrez la zone admin sur votre serveur pour consulter l’audit complet et les pièces.";
+ const dossierLink=adminUrl||"";
+ const homeLink=adminHomeUrl||(config.adminUrl?String(config.adminUrl).split("?")[0]:"")||"";
  const deferred=deferredDocuments(submission.answers,submission.uploads);
- const deferredLine=deferred.length?"\nPièces à récupérer : "+deferred.map(d=>d.label).join(", "):"";
- const name=(submission.answers.birthName||"").toUpperCase()+" "+(submission.answers.firstName||"");
+ const first=String(submission.answers.firstName||"").trim();
+ const last=String(submission.answers.birthName||"").trim();
+ // Sujet : « AEM — Zoé Récammier a soumis son questionnaire » (Prénom + nom).
+ const subjectName=(()=>{
+  const prenom=first?first.charAt(0).toUpperCase()+first.slice(1):"";
+  const nomOut=last && last===last.toUpperCase()?last:(last?last.charAt(0).toUpperCase()+last.slice(1).toLowerCase():"");
+  return [prenom,nomOut].filter(Boolean).join(" ")||"Candidat";
+ })();
+ const demarche=workflows[submission.answers.workflow]||submission.answers.workflow||"AEM";
+ const deferredLine=deferred.length
+  ?"\nDes pièces restent à récupérer : "+deferred.map(d=>d.label).join(", ")+"."
+  :"\nAucune pièce n’était signalée comme à récupérer à la soumission.";
+ const openAdmin=homeLink?"\nOuvrir l’Admin : "+homeLink:"";
+ const openDossier=dossierLink?"\nConsulter le dossier : "+dossierLink:"";
  const text=attachments
- ? audit+"\n\nRéférence de transmission : "+submission.submissionId+adminLine
- : "Nouveau dossier arrivé dans la zone admin AEM\n\nCandidat : "+name+"\nDémarche : "+(workflows[submission.answers.workflow]||submission.answers.workflow)+"\nRéférence : "+submission.submissionId+"\nE-mail : "+submission.answers.email+"\nTéléphone : "+submission.answers.phone+deferredLine+"\n\nLe dossier est disponible dans la zone admin (audit complet et pièces jointes)."+adminLine+"\n\n— Extrait —\n"+audit.split("\n").slice(0,12).join("\n");
+  ? audit+"\n\nRéférence de transmission : "+submission.submissionId+openAdmin+openDossier
+  : subjectName+" a terminé et soumis son questionnaire "+demarche+".\n"
+    +"Son dossier est disponible dans l’Admin pour vérification."
+    +deferredLine
+    +openAdmin
+    +openDossier
+    +"\n\nRéférence : "+submission.submissionId
+    +"\nE-mail : "+(submission.answers.email||"—")
+    +"\nTéléphone : "+(submission.answers.phone||"—")
+    +"\n\n— Extrait —\n"+audit.split("\n").slice(0,12).join("\n");
  return {
- from:config.from,to:config.recipient,replyTo:{address:submission.answers.email,name:submission.answers.firstName+" "+submission.answers.birthName},
- subject:"[AEM Admin] Nouveau dossier — "+subjectFor(submission.answers),
- text,
- ...(attachments?{attachments:submission.uploads.map(f=>({filename:f.name,content:f.content,contentType:f.contentType,contentDisposition:"attachment"}))}:{}),
- disableFileAccess:true,disableUrlAccess:true
+  from:config.from,to:config.recipient,replyTo:{address:submission.answers.email,name:submission.answers.firstName+" "+submission.answers.birthName},
+  subject:"AEM — "+subjectName+" a soumis son questionnaire",
+  text,
+  ...(attachments?{attachments:submission.uploads.map(f=>({filename:f.name,content:f.content,contentType:f.contentType,contentDisposition:"attachment"}))}:{}),
+  disableFileAccess:true,disableUrlAccess:true
  };
 }
 async function readBody(req,max=8192){
@@ -347,7 +369,9 @@ export function createApp(options={}){
   const uploads=Array.isArray(submission.uploads)?submission.uploads:[];
   const attachments=Boolean(config.mailAttachments && uploads.length);
   const mail=prepareMail({submissionId:id,answers:submission.answers||{},uploads},config,{
-   adminUrl:dossierAdminUrl(adminBase,id),attachments
+   adminUrl:dossierAdminUrl(adminBase,id),
+   adminHomeUrl:adminBase,
+   attachments
   });
   const deferred=deferredDocuments(submission.answers||{},uploads);
   return {
@@ -648,17 +672,60 @@ export function createApp(options={}){
  const meta=await storage.get(detail[1]);
  if(!meta)return json(res,404,{error:"Dossier introuvable."});
  const answers=meta.answers||{};
- const documents=documentsFor(answers,receivedAt(meta)).map(d=>({key:d.key,label:d.label,group:d.group,requiredUpload:Boolean(d.requiredUpload),fileCount:(meta.files||[]).filter(f=>f.key===d.key).length,deferred:isDeferred(answers,d.key)}));
- return json(res,200,{dossier:{...withWorkflowLabel(meta),expiresAt:expiresAtOf(meta)},documents,statuses:dossierStatuses});
+ const documents=documentsFor(answers,receivedAt(meta)).map(d=>({key:d.key,label:adminDocumentLabel(d,answers),group:d.group,requiredUpload:Boolean(d.requiredUpload),fileCount:(meta.files||[]).filter(f=>f.key===d.key).length,deferred:isDeferred(answers,d.key)}));
+ return json(res,200,{dossier:{...withWorkflowLabel(meta),expiresAt:expiresAtOf(meta),exportFolderName:personFolderName(meta.birthName,meta.firstName),exportFiles:exportNamesForDossier(meta).map(({file,exportName,needsFace,face})=>({index:file.index,key:file.key,exportName,needsFace,face,originalName:file.originalName||file.name||""}))},documents,statuses:dossierStatuses});
  }
  const exportRoute=route.match(/^api\/admin\/dossiers\/([a-f0-9-]+)\/export$/);
  if(exportRoute && req.method==="GET"){
  if(!isSubmissionId(exportRoute[1]))return json(res,404,{error:"Dossier introuvable."});
  const meta=await storage.get(exportRoute[1]);
  if(!meta)return json(res,404,{error:"Dossier introuvable."});
- const documents=documentsFor(meta.answers||{},receivedAt(meta)).map(d=>({...d,fileCount:(meta.files||[]).filter(f=>f.key===d.key).length,deferred:isDeferred(meta.answers||{},d.key)}));
+ const documents=documentsFor(meta.answers||{},receivedAt(meta)).map(d=>({...d,label:adminDocumentLabel(d,meta.answers||{}),fileCount:(meta.files||[]).filter(f=>f.key===d.key).length,deferred:isDeferred(meta.answers||{},d.key)}));
  res.writeHead(200,{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store"});
  return res.end(renderExport(withWorkflowLabel(meta),documents,{expiresAt:expiresAtOf(meta),by:session.user}));
+ }
+ const archiveRoute=route.match(/^api\/admin\/dossiers\/([a-f0-9-]+)\/archive\.zip$/);
+ if(archiveRoute && req.method==="GET"){
+  if(!isSubmissionId(archiveRoute[1]))return json(res,404,{error:"Dossier introuvable."});
+  const meta=await storage.get(archiveRoute[1]);
+  if(!meta)return json(res,404,{error:"Dossier introuvable."});
+  const folder=personFolderName(meta.birthName,meta.firstName);
+  const planned=exportNamesForDossier(meta);
+  const entries={};
+  const included=[];
+  const failed=[];
+  let totalBytes=0;
+  const MAX_ARCHIVE_BYTES=40*1024*1024;
+  for(const item of planned){
+   try{
+    const got=await storage.readFileContent(meta.id,item.file.index);
+    if(!got){failed.push({index:item.file.index,exportName:item.exportName,error:"Fichier indisponible."});continue;}
+    totalBytes+=got.content.length;
+    if(totalBytes>MAX_ARCHIVE_BYTES){failed.push({index:item.file.index,exportName:item.exportName,error:"Archive trop volumineuse."});break;}
+    const safeName=sanitizeWindowsBase(item.exportName,{max:180});
+    if(safeName.includes("..") || safeName.includes("/") || safeName.includes("\\")){failed.push({index:item.file.index,exportName:item.exportName,error:"Nom d’entrée refusé."});continue;}
+    entries[folder+"/"+safeName]=new Uint8Array(got.content);
+    included.push({index:item.file.index,exportName:safeName});
+   }catch(e){
+    failed.push({index:item.file.index,exportName:item.exportName,error:"Lecture impossible."});
+   }
+  }
+  if(!included.length)return json(res,404,{error:"Aucun document exportable pour ce dossier.",failed});
+  let zipped;
+  try{zipped=Buffer.from(zipSync(entries,{level:6}));}
+  catch{return json(res,500,{error:"Impossible de générer l’archive ZIP."});}
+  const zipName=zipArchiveFileName(meta.birthName,meta.firstName);
+  const filename=encodeURIComponent(zipName).replace(/[!'()*]/g,c=>"%"+c.charCodeAt(0).toString(16).toUpperCase());
+  res.writeHead(200,{
+   "Content-Type":"application/zip",
+   "Content-Length":zipped.length,
+   "Cache-Control":"no-store",
+   "X-Content-Type-Options":"nosniff",
+   "Content-Disposition":"attachment; filename*=UTF-8''"+filename,
+   "X-AEM-Archive-Included":String(included.length),
+   "X-AEM-Archive-Failed":String(failed.length)
+  });
+  return res.end(zipped);
  }
  if(detail && req.method==="DELETE"){
  // Effacement définitif (droit à l'effacement, dossier terminé) : réponses, fichiers, historique et reçu d'envoi.
@@ -797,10 +864,13 @@ export function createApp(options={}){
    if(readOnly(session,res))return;
    if(!isSubmissionId(fileRoute[1]))return json(res,404,{error:"Fichier introuvable."});
    const body=await readJson(req,8192);
-   const displayName=typeof body?.displayName==="string"?body.displayName:"";
-   const updated=await storage.renameFile(fileRoute[1],fileRoute[2],displayName,{by:session.user});
+   const patch={};
+   if(typeof body?.displayName==="string")patch.displayName=body.displayName;
+   if(Object.prototype.hasOwnProperty.call(body||{},"face"))patch.face=body.face;
+   if(!Object.keys(patch).length)return json(res,400,{error:"Aucune modification fournie."});
+   const updated=await storage.patchFile(fileRoute[1],fileRoute[2],patch,{by:session.user});
    if(!updated)return json(res,404,{error:"Fichier introuvable."});
-   return json(res,200,{dossier:{...withWorkflowLabel(updated),expiresAt:expiresAtOf(updated)}});
+   return json(res,200,{dossier:{...withWorkflowLabel(updated),expiresAt:expiresAtOf(updated),exportFolderName:personFolderName(updated.birthName,updated.firstName),exportFiles:exportNamesForDossier(updated).map(({file,exportName,needsFace,face})=>({index:file.index,key:file.key,exportName,needsFace,face,originalName:file.originalName||file.name||""}))}});
   }catch(e){return json(res,e.status||400,{error:e.message||"Requête invalide."});}
  }
  if(fileRoute && req.method==="GET"){
@@ -808,7 +878,7 @@ export function createApp(options={}){
  const item=await storage.readFileContent(fileRoute[1],fileRoute[2]);
  if(!item)return json(res,404,{error:"Fichier introuvable."});
  const download=url.searchParams.has("download");
- const filename=encodeURIComponent(fileDownloadName(item.file)).replace(/[!'()*]/g,c=>"%"+c.charCodeAt(0).toString(16).toUpperCase());
+ const filename=encodeURIComponent(fileDownloadName(item.file,item.meta)).replace(/[!'()*]/g,c=>"%"+c.charCodeAt(0).toString(16).toUpperCase());
  res.writeHead(200,{"Content-Type":item.file.contentType,"Content-Length":item.content.length,"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","Content-Disposition":(download?"attachment":"inline")+"; filename*=UTF-8''"+filename});
  res.end(item.content);return;
  }

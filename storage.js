@@ -2,6 +2,7 @@ import {mkdir,readdir,readFile,writeFile,rename,rm} from "node:fs/promises";
 import path from "node:path";
 import {ageFromDate,workflows,documentsFor} from "./logic.js";
 import {createLegacyFsBlobStore,createFileBlobs} from "./blob-store.js";
+import {exportFileName,fileExtension,normalizeFace,needsFaceQualification} from "./export-names.js";
 
 export const UUID_RE=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 export function isSubmissionId(id){return typeof id==="string" && UUID_RE.test(id);}
@@ -52,7 +53,21 @@ export function buildDisplayName({birthName,firstName,label,ext,taken=new Set()}
  taken.add(candidate.toLowerCase());
  return candidate;
 }
-export function fileDownloadName(file){return (file&&(file.displayName||file.name))||"piece";}
+export function fileDownloadName(file,meta=null){
+ if(meta && file){
+  try{
+   return exportFileName({
+    birthName:meta.birthName,
+    firstName:meta.firstName,
+    key:file.key,
+    face:file.face,
+    ext:fileExtension(file.originalName||file.name||file.displayName||""),
+    europeSituation:meta.answers?.europeSituation||""
+   });
+  }catch{/* repli displayName */}
+ }
+ return (file&&(file.displayName||file.name))||"piece";
+}
 export function finalizedAtOf(meta){
  const raw=meta?.finalizedAt||meta?.createdAt;
  const n=raw?new Date(raw).getTime():NaN;
@@ -156,16 +171,17 @@ export function createStorage(dataDir,{files,blobs,blobScope="dossiers"}={}){
   await mkdir(path.join(root,id),{recursive:true,mode:0o700});
   const filesMeta=[];
   const taken=new Set();
-  const docs=documentsFor(submission.answers||{});
-  const labelOf=key=>docs.find(d=>d.key===key)?.label||key;
   const nowIso=new Date().toISOString();
+  const europeSituation=submission.answers?.europeSituation||"";
   for(let i=0;i<submission.uploads.length;i++){
    const file=submission.uploads[i];
    const storedAs=i+"-"+sanitizeName(file.name);
    await fileStore.putFile(id,storedAs,file.content,file.contentType);
    const originalName=file.name;
-   const displayName=buildDisplayName({birthName:submission.answers.birthName,firstName:submission.answers.firstName,label:labelOf(file.key),ext:fileExt(originalName),taken});
-   filesMeta.push({index:i,key:file.key,name:originalName,originalName,displayName,size:file.size,contentType:file.contentType,storedAs});
+   const ext=fileExt(originalName);
+   // Nouveaux dossiers : displayName aligné sur la nomenclature d’export (sans réécrire les anciens).
+   const displayName=exportFileName({birthName:submission.answers.birthName,firstName:submission.answers.firstName,key:file.key,ext,europeSituation,taken});
+   filesMeta.push({index:i,key:file.key,name:originalName,originalName,displayName,face:"",size:file.size,contentType:file.contentType,storedAs});
   }
   const meta={
    id,
@@ -268,12 +284,13 @@ export function createStorage(dataDir,{files,blobs,blobScope="dossiers"}={}){
   }
   let index=meta.files.reduce((max,f)=>Math.max(max,f.index),-1)+1;
   const taken=new Set((meta.files||[]).map(f=>String(f.displayName||f.name||"").toLowerCase()).filter(Boolean));
+  const europeSituation=meta.answers?.europeSituation||"";
   for(const file of uploads){
    const storedAs=index+"-"+sanitizeName(file.name);
    await fileStore.putFile(id,storedAs,file.content,file.contentType);
    const originalName=file.name;
-   const displayName=buildDisplayName({birthName:meta.birthName,firstName:meta.firstName,label,ext:fileExt(originalName),taken});
-   meta.files.push({index,key,name:originalName,originalName,displayName,size:file.size,contentType:file.contentType,storedAs,source:"comptoir",addedAt:new Date().toISOString(),addedBy:String(by).slice(0,64)});
+   const displayName=exportFileName({birthName:meta.birthName,firstName:meta.firstName,key,ext:fileExt(originalName),europeSituation,taken});
+   meta.files.push({index,key,name:originalName,originalName,displayName,face:"",size:file.size,contentType:file.contentType,storedAs,source:"comptoir",addedAt:new Date().toISOString(),addedBy:String(by).slice(0,64)});
    index++;
   }
   if(Array.isArray(meta.answers?.deferred))meta.answers.deferred=meta.answers.deferred.filter(k=>k!==key);
@@ -294,6 +311,9 @@ export function createStorage(dataDir,{files,blobs,blobScope="dossiers"}={}){
   return {meta,file,content};
  }
  function renameFile(id,index,displayName,{by="système"}={}){
+  return patchFile(id,index,{displayName},{by});
+ }
+ function patchFile(id,index,patch={}, {by="système"}={}){
   if(!isSubmissionId(id))return Promise.resolve(null);
   return withLock(id,async()=>{
    const meta=await readMeta(id);
@@ -301,19 +321,33 @@ export function createStorage(dataDir,{files,blobs,blobScope="dossiers"}={}){
    meta.files||=[];meta.history||=[];
    const file=meta.files.find(f=>f.index===Number(index));
    if(!file)return null;
-   const raw=String(displayName||"").trim();
-   if(!raw)throw Object.assign(new Error("Nom d’affichage invalide."),{status:400});
-   const wanted=sanitizeDisplayBase(raw);
-   if(!wanted)throw Object.assign(new Error("Nom d’affichage invalide."),{status:400});
-   const ext=fileExt(file.originalName||file.name||file.displayName||"");
-   const hasExt=/\.[A-Za-z0-9]{1,8}$/.test(wanted);
-   let next=hasExt?wanted:(wanted+"."+(ext||"bin"));
-   const taken=new Set(meta.files.filter(f=>f!==file).map(f=>String(f.displayName||f.name||"").toLowerCase()));
-   let n=1,base=next.replace(/\.[A-Za-z0-9]{1,8}$/,""),extension=(next.match(/\.([A-Za-z0-9]{1,8})$/)||[])[1]||ext||"bin",candidate=next;
-   while(taken.has(candidate.toLowerCase())){n++;candidate=base+" ("+n+")."+extension;}
-   if(!file.originalName)file.originalName=file.name;
-   file.displayName=candidate;
-   meta.history.push(historyEntry(by,"note","Nom d’affichage : "+candidate));
+   let changed=false;
+   if(Object.prototype.hasOwnProperty.call(patch,"displayName")){
+    const raw=String(patch.displayName||"").trim();
+    if(!raw)throw Object.assign(new Error("Nom d’affichage invalide."),{status:400});
+    const wanted=sanitizeDisplayBase(raw);
+    if(!wanted)throw Object.assign(new Error("Nom d’affichage invalide."),{status:400});
+    const ext=fileExt(file.originalName||file.name||file.displayName||"");
+    const hasExt=/\.[A-Za-z0-9]{1,8}$/.test(wanted);
+    let next=hasExt?wanted:(wanted+"."+(ext||"bin"));
+    const taken=new Set(meta.files.filter(f=>f!==file).map(f=>String(f.displayName||f.name||"").toLowerCase()));
+    let n=1,base=next.replace(/\.[A-Za-z0-9]{1,8}$/,""),extension=(next.match(/\.([A-Za-z0-9]{1,8})$/)||[])[1]||ext||"bin",candidate=next;
+    while(taken.has(candidate.toLowerCase())){n++;candidate=base+" ("+n+")."+extension;}
+    if(!file.originalName)file.originalName=file.name;
+    file.displayName=candidate;
+    meta.history.push(historyEntry(by,"note","Nom d’affichage : "+candidate));
+    changed=true;
+   }
+   if(Object.prototype.hasOwnProperty.call(patch,"face")){
+    if(!needsFaceQualification(file.key))throw Object.assign(new Error("Cette pièce ne se qualifie pas en recto/verso."),{status:400});
+    const face=normalizeFace(patch.face);
+    if(face!==(file.face||"")){
+     file.face=face;
+     meta.history.push(historyEntry(by,"note","Qualification face : "+(face||"à qualifier")+" (fichier "+file.index+")"));
+     changed=true;
+    }
+   }
+   if(!changed)return meta;
    await writeMeta(meta);
    await rebuildIndex();
    return meta;
@@ -344,5 +378,5 @@ export function createStorage(dataDir,{files,blobs,blobScope="dossiers"}={}){
   }
   return removed;
  }
- return {root,list,get,save,update,addFiles,renameFile,readFileContent,remove,purgeOlderThan,rebuildIndex,fileStore};
+ return {root,list,get,save,update,addFiles,renameFile,patchFile,readFileContent,remove,purgeOlderThan,rebuildIndex,fileStore};
 }

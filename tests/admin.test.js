@@ -165,12 +165,13 @@ test("Pièces différées visibles côté admin : liste (incomplete), fiche (doc
  assert.ok(detail.dossier.history[0].details.includes("2 pièce(s) à récupérer"));
  const byKey=Object.fromEntries(detail.documents.map(d=>[d.key,d]));
  assert.deepEqual([byKey.jdc.deferred,byKey.jdc.fileCount,byKey.hosting.deferred,byKey.identity_cni_fr.deferred,byKey.identity_cni_fr.fileCount],[true,0,true,false,1]);
- assert.ok(h.messages[0].text.includes("Pièces à récupérer : JDC ou avis de situation, Attestation d’hébergement datée d’aujourd’hui"));
+ assert.ok(/Des pièces restent à récupérer : .*JDC ou avis de situation/.test(h.messages[0].text));
+ assert.ok(h.messages[0].text.includes("Attestation d’hébergement datée d’aujourd’hui"));
  const complete=crypto.randomUUID();
  assert.equal((await send(h,form(candidate,attachmentsFor(candidate),complete))).status,200);
  const full=await (await fetch(h.url+"/api/admin/dossiers/"+complete,{headers:{Cookie:cookie}})).json();
  assert.equal(full.dossier.incomplete,false);assert.ok(full.documents.every(d=>d.deferred===false));
- assert.ok(!h.messages.at(-1).text.includes("Pièces à récupérer"));
+ assert.ok(!/Des pièces restent à récupérer/.test(h.messages.at(-1).text));
  }finally{await h.close();}
 });
 

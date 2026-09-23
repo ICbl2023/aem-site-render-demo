@@ -206,6 +206,15 @@ export function documentsFor(a,now=new Date()){
  }
  return d;
 }
+/** Libellé Admin (affichage) : ne modifie pas le questionnaire ni les clés techniques. */
+export function adminDocumentLabel(doc,answers={}){
+ if(!doc)return "";
+ if(doc.key==="europe_residence" && answers.europeSituation==="worker"){
+  // Demande métier : remplacer « fiche de paie » dans l’Admin, sans fusionner avec home_*.
+  return "Justificatif de domicile (situation Europe — activité professionnelle)";
+ }
+ return doc.label;
+}
 export function deferredKeys(a){return Array.isArray(a.deferred)?a.deferred.filter(k=>typeof k==="string"):[];}
 export function isDeferred(a,key){return deferredKeys(a).includes(key);}
 export function deferredDocuments(a,files=[],now=new Date()){

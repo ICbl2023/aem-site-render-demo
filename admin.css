@@ -151,6 +151,21 @@
 .admin-audit { margin:10px 0 6px; padding:14px; border-radius:10px; background:#F8FAFD; border:1px solid var(--ligne); white-space:pre-wrap; font-size:13px; line-height:1.55; overflow:auto; max-height:320px; }
 .admin-tools { display:flex; flex-wrap:wrap; gap:10px; margin:16px 0 0; }
 .admin-tools .secondary-button { text-decoration:none; }
+.admin-export-status { margin:8px 0 0; font-size:13px; color:var(--globe-fonce); }
+.admin-export-tip { margin-top:8px; }
+.admin-files li { display:grid; grid-template-columns:auto 1fr auto; gap:10px 12px; align-items:start; }
+.admin-drag-handle {
+ display:inline-flex; align-items:center; justify-content:center;
+ min-width:28px; min-height:36px; padding:4px 6px; margin:0;
+ border:1px dashed #9AA8BD; border-radius:8px; background:#fff;
+ color:var(--nuit); font-size:14px; line-height:1; cursor:grab; user-select:none;
+}
+.admin-drag-handle:active, .admin-drag-handle.is-dragging { cursor:grabbing; border-color:var(--ambre); background:#FFF8E8; }
+.admin-file-info { display:grid; gap:2px; min-width:0; }
+.admin-file-actions { display:flex; flex-wrap:wrap; align-items:center; gap:4px 0; justify-content:flex-end; }
+.admin-face-label { display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:var(--nuit); }
+.admin-face-select { font:inherit; font-size:12px; font-weight:600; max-width:11rem; }
+.admin-face-warn { color:#9A3412; font-weight:700; }
 .admin-readonly { margin:18px 0 0; padding:10px 12px; border-radius:10px; background:#ECEFF3; }
 .admin-actions { display:grid; gap:10px; margin-top:22px; padding:18px; border-radius:14px; background:#F4F6FA; }
 .admin-actions select, .admin-actions textarea { width:100%; }

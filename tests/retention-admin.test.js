@@ -37,7 +37,7 @@ test("displayName métier à la sauvegarde ; originalName et storedAs conservés
  const idFile=meta.files.find(f=>f.key==="identity_cni_fr");
  assert.equal(idFile.originalName,"IMG_1234.jpg");
  assert.equal(idFile.name,"IMG_1234.jpg");
- assert.match(idFile.displayName,/^GRAYSON Nolan - .+\.jpg$/i);
+ assert.match(idFile.displayName,/^GRAYSON Nolan identite\.jpg$/i);
  assert.ok(idFile.storedAs.startsWith("0-"));
  assert.notEqual(idFile.displayName,idFile.originalName);
 });
@@ -169,11 +169,13 @@ test("Renommage displayName + Content-Disposition open/download",async()=>{
   assert.equal(detail.files[0].displayName,renamed);
   assert.equal(detail.files[0].originalName,"photo-brute.png");
   assert.equal(detail.files[0].storedAs,file.storedAs);
+  const exportName=(detail.exportFiles||[]).find(f=>f.index===file.index)?.exportName||"";
+  assert.match(exportName,/GRAYSON Nolan/i);
 
   const open=await fetch(h.url+"/api/admin/dossiers/"+id+"/files/"+file.index,{headers:{Cookie:cookie}});
   assert.equal(open.status,200);
   assert.match(open.headers.get("content-disposition")||"",/^inline;/);
-  assert.ok((open.headers.get("content-disposition")||"").includes(encodeURIComponent(renamed)));
+  assert.ok((open.headers.get("content-disposition")||"").includes(encodeURIComponent(exportName)));
 
   const dl=await fetch(h.url+"/api/admin/dossiers/"+id+"/files/"+file.index+"?download=1",{headers:{Cookie:cookie}});
   assert.equal(dl.status,200);
