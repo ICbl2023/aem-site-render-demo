@@ -22,8 +22,8 @@ Environ 49 phrases, une vingtaine de minutes. Les phrases composées (« Parfait
 | `q-identityDocument-2.mp3` | Choisissez dans la liste : |
 | `q-identityExpiry-1.mp3` | Jusqu’à quand est-il valable ? Si vous ne savez pas, dites « je ne sais pas ». |
 | `q-identityExpiry-2.mp3` | La date de fin de validité, ou « je ne sais pas ». |
-| `q-emancipated-1.mp3` | Êtes-vous un mineur émancipé ? Oui ou non. |
-| `q-emancipated-2.mp3` | Oui ou non ? |
+| `q-emancipated-1.mp3` | *(retiré du parcours — piste conservée hors usage actif)* |
+| `q-emancipated-2.mp3` | *(retiré du parcours — piste conservée hors usage actif)* |
 | `q-contactName-1.mp3` | Comme vous êtes mineur, qui peut-on contacter en cas de besoin ? Son nom et son prénom. |
 | `q-contactName-2.mp3` | Le nom et le prénom de votre responsable. |
 | `q-contactPhone-1.mp3` | Et son numéro de téléphone ? |
@@ -44,8 +44,8 @@ Environ 49 phrases, une vingtaine de minutes. Les phrases composées (« Parfait
 | `q-special-2.mp3` | Oui ou non ? |
 | `q-specialReason-1.mp3` | De quelle situation s’agit-il ? |
 | `q-specialReason-2.mp3` | Choisissez dans la liste : |
-| `q-permitType-1.mp3` | Votre demande concerne-t-elle un premier permis, après la réussite de l’examen, ou le renouvellement de votre permis actuel ? |
-| `q-permitType-2.mp3` | Répondez « premier permis » ou « renouvellement ». |
+| `q-permitType-1.mp3` | *(retiré du parcours — piste conservée hors usage actif)* |
+| `q-permitType-2.mp3` | *(retiré du parcours — piste conservée hors usage actif)* |
 | `q-medical-1.mp3` | Une visite médicale est-elle nécessaire dans votre cas ? Oui ou non. |
 | `q-medical-2.mp3` | Oui ou non ? |
 | `accueil-voix.mp3` | Bonjour ! Je vais vous poser quelques questions : répondez simplement à voix haute. Vous pouvez aussi écrire à tout moment. |

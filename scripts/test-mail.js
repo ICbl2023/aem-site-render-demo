@@ -18,8 +18,8 @@ const attachment=Buffer.from(pdf);
 for(const workflow of ["ants","permis"]){
  const id=randomUUID(),data=new FormData(),files=[];
  const homeDate=new Intl.DateTimeFormat("sv-SE",{timeZone:"Europe/Paris",year:"numeric",month:"2-digit"}).format(new Date());
- const answers={workflow,birthName:"TEST-AEM",firstName:"Transmission",birthDate:"2000-01-01",phone:"0600000000",email:"test@example.test",nationality:"francaise",identityDocument:"cni_fr",identityExpiry:"",home:"own",homeProof:"facture",homeDate,special:"non",medical:"non",...(workflow==="permis"?{permitType:"renewal"}:{})};
- const keys=["identity_cni_fr","home_own",...(workflow==="permis"?["permit_current"]:[])];
+ const answers={workflow,birthName:"TEST-AEM",firstName:"Transmission",birthDate:"2000-01-01",phone:"0600000000",email:"test@example.test",nationality:"francaise",identityDocument:"cni_fr",identityExpiry:"",home:"own",homeProof:"facture",homeDate,special:"non",medical:"non"};
+ const keys=["identity_cni_fr","home_own"];
  keys.forEach((key,index)=>{
  const field="file_"+index,name="TEST-FICTIF-"+key+".pdf";
  data.append(field,new Blob([attachment],{type:"application/pdf"}),name);

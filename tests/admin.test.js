@@ -82,9 +82,11 @@ test("Accusé candidat : pièces différées listées, échec du mail sans éche
  assert.ok(mail.text.includes("Prochaines étapes : préparez les pièces listées ci-dessus ; AEM vous recontactera pour convenir de leur transmission (réponse à cet e-mail ou dépôt à l’auto-école) et vérifie le reste du dossier."));
  assert.ok(!mail.text.includes("Aucune action n’est attendue"));
  assert.ok(!mail.text.includes(".pdf"),"seuls les libellés des pièces sont cités");
- // Le permis n'est jamais différable : un report déclaré est ignoré et la pièce reste « manquante » (le serveur refuse d'ailleurs l'envoi).
- const strict=prepareCandidateMail({answers:{...candidate,workflow:"permis",deferred:["permit_current"]},uploads:attachmentsFor(candidate),submissionId:crypto.randomUUID()},{from:"aem@example.test"});
- assert.ok(strict.text.includes("Pièces manquantes :\n- Permis de conduire actuel"));assert.ok(!strict.text.includes("Pièces à fournir"));
+ // L’identité n’est jamais différable : un report déclaré est ignoré et la pièce reste « manquante » (le serveur refuse d’ailleurs l’envoi).
+ const permisStrict={...candidate,workflow:"permis",medical:"non",deferred:["identity_cni_fr"]};
+ const strictUploads=attachmentsFor({...permisStrict,deferred:[]}).filter(f=>f.key!=="identity_cni_fr");
+ const strict=prepareCandidateMail({answers:permisStrict,uploads:strictUploads,submissionId:crypto.randomUUID()},{from:"aem@example.test"});
+ assert.ok(strict.text.includes("Pièces manquantes :\n- Carte nationale d’identité française"));assert.ok(!strict.text.includes("Pièces à fournir"));
  assert.ok(strict.text.includes("Aucune action n’est attendue"));
  const dataDir="test-results/ack-"+crypto.randomUUID();
  const transport={sent:[],async sendMail(m){if(m.to?.address==="nolan@example.test")throw new Error("candidate SMTP failure");this.sent.push(m);return {accepted:[m.to]};}};

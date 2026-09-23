@@ -13,7 +13,7 @@ const app=createApp({config:{standalone:true,origin,dataDir:path.join(out,"serve
 await new Promise((resolve,reject)=>{app.once("error",reject);app.listen(4195,"127.0.0.1",resolve);});
 const png=Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3ioAAAAASUVORK5CYII=","base64");
 const pdf=Buffer.from("%PDF-1.4\n% DOCUMENT FICTIF DE REPRISE AEM\n1 0 obj << /Type /Catalog >> endobj\n%%EOF");
-const person=workflow=>({workflow,birthName:"EXEMPLE",firstName:"Vergil",birthDate:"1990-03-12",phone:"0600000000",email:"vergil@example.test",nationality:"etrangere",identityDocument:"cni_europe",europeSituation:"student",home:"own",homeProof:"facture",homeDate:"2026-08",special:"non",permitType:"first",medical:"non"});
+const person=workflow=>({workflow,birthName:"EXEMPLE",firstName:"Vergil",birthDate:"1990-03-12",phone:"0600000000",email:"vergil@example.test",nationality:"etrangere",identityDocument:"cni_europe",europeSituation:"student",home:"own",homeProof:"facture",homeDate:"2026-08",special:"non",medical:"non"});
 const results=[],contexts=new Set(),pageErrors=[];
 async function persistent(engine,name){
  const options={headless:true,viewport:{width:390,height:844},reducedMotion:"reduce",...(engine==="chromium"?{executablePath:"C:/Program Files/Google/Chrome/Application/chrome.exe"}:{...devices["iPhone 13"]})};

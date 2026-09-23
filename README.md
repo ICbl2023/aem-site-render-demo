@@ -534,7 +534,7 @@ pour éviter tout débordement horizontal. Vérifié en largeur 390 px sur toute
 
 1. **Mentions légales et confidentialité** : `mentions-legales.html` (AEMG, SIREN 832 466 759, agrément, directeur de publication, hébergeur) et `confidentialite.html` (données, finalités, base légale, durées, droits, assistants, cookies), liées dans tous les pieds de page, dans la note des questionnaires et dans la case de consentement de l’envoi.
 2. **Promesse alignée** : le menu et l’accueil disent « Préparer mon dossier ANTS » ; la page inscription précise qu’une seule étape se fait en ligne, que l’évaluation et le contrat se signent à l’agence, sans paiement ni signature sur le site.
-3. **Parcours Permis** : nouvelle étape « Quelle est votre demande ? » (premier permis avec certificat d’examen CEPC, ou renouvellement avec le titre actuel) ; la pièce demandée et son libellé s’adaptent (`permit_cepc` / `permit_current`).
+3. **Parcours Permis** : identité, domicile et avis médical (si la situation le prévoit). Les étapes « mineur émancipé », « Quelle est votre demande ? » et les pièces obligatoires `permit_cepc` / `permit_current` ont été retirées du questionnaire ; les dossiers Admin historiques qui contiennent encore ces fichiers restent consultables.
 4. **Tarifs** : boîte automatique, heures supplémentaires et post-permis affichés comme « sur devis après évaluation » (tarifs et formations) ; les avis Google ne sont plus présentés comme « certifiés ».
 5. **Un seul registre** : l’assistant de saisie vouvoie désormais, comme le site, le chat et l’admin, en gardant un ton simple.
 Le chatbot ne cite plus horaires et tarifs qu’à partir de la liste fournie dans son prompt.

@@ -19,7 +19,6 @@ const QUESTIONS={
  identityDocument:{first:"Quel document d’identité avez-vous ?",retry:"Choisissez dans la liste :"},
  europeSituation:{first:"Avec une carte d’identité européenne : quelle est votre situation en France ? Étudiant(e), salarié(e) ou personne qui travaille, ou une autre situation ?",retry:"Répondez « étudiant », « salarié » / « je travaille », ou « autre situation »."},
  identityExpiry:{first:"Jusqu’à quand est-il valable ? Si vous ne savez pas, dites « je ne sais pas ».",retry:"La date de fin de validité, ou « je ne sais pas »."},
- emancipated:{first:"Êtes-vous un mineur émancipé ? Oui ou non.",retry:"Oui ou non ?"},
  contactName:{first:"Comme vous êtes mineur, qui peut-on contacter en cas de besoin ? Son nom et son prénom.",retry:"Le nom et le prénom de votre responsable."},
  contactPhone:{first:"Et son numéro de téléphone ?",retry:"Un numéro à dix chiffres."},
  contactEmail:{first:"Son adresse e-mail, si vous la connaissez ? Sinon dites « je ne sais pas ».",retry:"Une adresse e-mail, ou « je ne sais pas »."},
@@ -30,7 +29,6 @@ const QUESTIONS={
  parentExpiry:{first:"Jusqu’à quand la pièce d’identité de votre parent est-elle valable ? Sinon « je ne sais pas ».",retry:"Une date, ou « je ne sais pas »."},
  special:{first:"Dernière chose : votre situation demande-t-elle un justificatif particulier, par exemple médical ou de handicap ? Oui ou non.",retry:"Oui ou non ?"},
  specialReason:{first:"De quelle situation s’agit-il ?",retry:"Choisissez dans la liste :"},
- permitType:{first:"Votre demande concerne-t-elle un premier permis, après la réussite de l’examen, ou le renouvellement de votre permis actuel ?",retry:"Répondez « premier permis » ou « renouvellement »."},
  medical:{first:"Une visite médicale est-elle nécessaire dans votre cas ? Oui ou non.",retry:"Oui ou non ?"}
 };
 function optionList(field){return field.options.map(o=>o[1]).join(", ");}

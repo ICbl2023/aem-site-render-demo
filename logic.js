@@ -131,7 +131,6 @@ export function stepsFor(a) {
  step("coordinates","Comment vous joindre ?","Coordonnées",[field("phone","Ton téléphone","tel"),field("email","Ton email","email")],{hint:"Les coordonnées du candidat sont demandées quel que soit son âge."}),
  step("nationality","Quelle est votre nationalité ?","Identité",[choice("nationality","Nationalité",[["francaise","Française"],["etrangere","Étrangère"]])])
  ];
- if(flow==="permis" && ageFromDate(a.birthDate)!==null && ageFromDate(a.birthDate)<18) s.push(step("emancipation","Le candidat est-il mineur émancipé ?","Votre demande",[choice("emancipated","Mineur émancipé")],{hint:"La situation sera examinée par AEM. Cette réponse ne vaut pas confirmation d’éligibilité."}));
  s.push(step("identityDocument","Quel document d’identité possédez-vous ?","Identité",[choice("identityDocument","Document d’identité",identities[a.nationality]||[])]));
  if(a.identityDocument==="cni_europe"){
  s.push(step("europeSituation","Quelle est votre situation en France ?","Votre situation",[choice("europeSituation","Situation",[["student","Étudiant(e)"],["worker","Salarié(e)"]])],{hint:"Selon votre situation, un justificatif complémentaire sera demandé en plus de votre carte d’identité européenne. Ce choix n’est pas une validation automatique."}));
@@ -163,8 +162,6 @@ export function stepsFor(a) {
  if(a.special==="oui")s.push(step("specialFiles","Quel justificatif particulier devez-vous transmettre ?","Compléments",[choice("specialReason","Situation",[["medical","Visite médicale nécessaire"],["handicap","Situation de handicap / affection"],["existing","Permis ou examen déjà existant"],["other","Autre situation particulière"]])],{documentGroup:"special",hint:"Ajoutez le document correspondant à votre situation ou demandé par ANTS."}));
  }
  if(flow==="permis"){
- s.push(step("permitType","Quelle est votre demande ?","Permis",[choice("permitType","Votre demande",[["first","Premier permis : j’ai réussi l’examen (certificat d’examen, CEPC)"],["renewal","Renouvellement : permis perdu, volé, abîmé ou à mettre à jour"]])],{hint:"Après un premier examen réussi, vous n’avez généralement que le certificat d’examen : c’est lui qu’il faut joindre."}));
- s.push(step("permitFiles",a.permitType==="first"?"Ajoutez votre certificat d’examen (CEPC)":"Ajoutez votre permis de conduire actuel","Permis",[],{documentGroup:"permit",hint:a.permitType==="first"?"Joignez le certificat d’examen du permis de conduire remis après l’épreuve pratique (recto, et verso s’il est rempli).":"Joignez votre permis actuel. Vous pouvez ajouter plusieurs fichiers pour les différentes faces."}));
  s.push(step("medical","Une visite médicale est-elle nécessaire ?","Compléments",[choice("medical","Visite médicale nécessaire")],{hint:"Répondez selon les indications reçues. Le questionnaire ne détermine pas cette nécessité."}));
  if(a.medical==="oui")s.push(step("medicalFiles","Ajoutez l’avis médical","Compléments",[],{documentGroup:"medical"}));
  }
@@ -188,7 +185,7 @@ export function identityLabel(a){return (identities[a.nationality]||[]).find(x=>
 export function documentsFor(a,now=new Date()){
  const d=[{key:"identity_"+(a.identityDocument||"missing"),label:identityLabel(a),group:"identity",requiredUpload:true}];
  // deferrable : le candidat peut indiquer ne pas avoir la pièce sous la main ; AEM la récupère ensuite.
- // Jamais différables : le document d’identité et le permis de conduire.
+ // Jamais différable : le document d’identité.
  d.push(...ageDocuments(a,now).map(doc=>({...doc,requiredUpload:true,deferrable:true})));
  if(a.identityDocument==="cni_europe" && (a.europeSituation==="student" || a.europeSituation==="worker")){
  const label=a.europeSituation==="student"?"Bulletin scolaire datant d’il y a six mois, ou justificatif / attestation de scolarité":"Fiche de paie de plus de six mois";
@@ -199,11 +196,7 @@ export function documentsFor(a,now=new Date()){
  if(a.home==="parents")d.push({key:"hosting",label:"Attestation d’hébergement datée d’aujourd’hui",group:"home",requiredUpload:true,deferrable:true,hint:"Le modèle d’attestation est fourni dans le mail : remplissez-le aujourd’hui, puis joignez-le ici."},{key:"parent_identity",label:"Pièce d’identité du parent / responsable",group:"home",requiredUpload:true,deferrable:true});
  }
  if(a.workflow==="ants" && a.special==="oui" && a.specialReason)d.push({key:"special_"+a.specialReason,label:a.specialReason==="medical"?"Avis médical":"Justificatif particulier correspondant à la situation / demandé par ANTS",group:"special",requiredUpload:true,deferrable:true});
- if(a.workflow==="permis"){
- if(a.permitType==="first")d.push({key:"permit_cepc",label:"Certificat d’examen du permis de conduire (CEPC)",group:"permit",requiredUpload:true});
- else d.push({key:"permit_current",label:"Permis de conduire actuel",group:"permit",requiredUpload:true});
- if(a.medical==="oui")d.push({key:"medical",label:"Avis médical",group:"medical",requiredUpload:true,deferrable:true});
- }
+ if(a.workflow==="permis" && a.medical==="oui")d.push({key:"medical",label:"Avis médical",group:"medical",requiredUpload:true,deferrable:true});
  return d;
 }
 /** Libellé Admin (affichage) : ne modifie pas le questionnaire ni les clés techniques. */
@@ -305,7 +298,7 @@ export function auditText(a,files=[],now=new Date()){
  text.push("\nDOMICILE","Situation : "+(a.home==="parents"?"Hébergé chez ses parents":"Justificatif à son nom"),
  "Type : "+homeTypeLabel,...homeDateLines,documentLines("home"));
  if(a.home==="parents")text.push("Attestation d’hébergement : à joindre datée d’aujourd’hui (modèle fourni dans le mail).");
- const extras=stepsFor(a).filter(s=>["emancipation","europeSituation","permitType","special","specialFiles","medical"].includes(s.id));
+ const extras=stepsFor(a).filter(s=>["europeSituation","special","specialFiles","medical"].includes(s.id));
  if(extras.length)text.push("\nAUTRES INFORMATIONS");
  for(const s of extras)for(const f of s.fields)text.push(f.label+" : "+displayValue(f,a[f.key]));
  for(const group of ["special","permit","medical"])if(documentLines(group))text.push(documentLines(group));

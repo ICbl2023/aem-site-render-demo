@@ -11,7 +11,7 @@ services:
     runtime: node
     plan: free
     region: frankfurt
-    buildCommand: npm ci --omit=dev
+    buildCommand: npm ci --omit=dev && mkdir -p livraison && git archive --format=zip --prefix=aem-site/ -o livraison/aem-site-complet-actuel.zip HEAD
     startCommand: npm start
     healthCheckPath: /api/config
     envVars:

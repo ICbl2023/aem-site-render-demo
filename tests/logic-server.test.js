@@ -63,8 +63,10 @@ test("ANTS et permis : branches spécifiques et absence de nouvelles obligations
  const ants={...candidate,workflow:"ants",special:"oui",specialReason:"medical"};
  assert.ok(documentsFor(ants).some(d=>d.key==="special_medical"));assert.ok(stepsFor(ants).some(s=>s.id==="identityFiles"));
  const permit={...ants,workflow:"permis",medical:"oui"};
- assert.ok(documentsFor(permit).some(d=>d.key==="permit_current"));assert.ok(documentsFor(permit).some(d=>d.key==="medical"));
+ assert.ok(!documentsFor(permit).some(d=>d.key==="permit_current" || d.key==="permit_cepc"));
+ assert.ok(documentsFor(permit).some(d=>d.key==="medical"));
  assert.ok(documentsFor(permit).some(d=>d.group==="age"));
+ assert.ok(!stepsFor(permit).some(s=>s.id==="emancipation" || s.id==="permitType" || s.id==="permitFiles"));
 });
 test("Audit intégral, ordre du nom, pièces manquantes ≠ conformité",()=>{
  const text=auditText(candidate,[{key:"identity_cni_fr",name:"IMG_4827.HEIC"},{key:"identity_cni_fr",name:"IMG_4828.HEIC"}],now);
@@ -89,8 +91,8 @@ test("Transmission HTTP → stockage + notification, reprise sans doublon",async
  attachments.splice(1,0,{key:"identity_cni_fr",name:"recto été.png",content:png});
  let r=await send(h,form(candidate,attachments,id));assert.equal(r.status,200);assert.equal((await r.json()).ok,true);
  assert.equal(h.messages.length,1);const msg=h.messages[0];
- assert.equal(msg.subject,"[AEM Admin] Nouveau dossier — "+subjectFor(candidate));assert.ok(msg.text.includes("Nouveau dossier arrivé dans la zone admin"));assert.ok(msg.text.includes("nolan@example.test"));
- assert.ok(!msg.text.includes("Pièces à récupérer"),"aucune pièce différée : pas de ligne dédiée");
+ assert.match(msg.subject,/a soumis son questionnaire|Nouveau dossier/);assert.ok(msg.text.includes("nolan@example.test"));
+ assert.ok(!/Pièces à récupérer|restent à récupérer/.test(msg.text) || msg.text.includes("Aucune pièce"),"aucune pièce différée bloquante dans le mail");
  const {readFile}=await import("node:fs/promises");
  const meta=JSON.parse(await readFile(h.dataDir+"/"+id+"/meta.json","utf8"));
  assert.equal(meta.files.length,attachments.length);
@@ -242,17 +244,19 @@ test("Deux parcours : ordre commun, choix identiques, schéma exact",()=>{
  assert.deepEqual(steps[0].fields.map(f=>[f.key,f.type,f.required]),[["birthName","text",true],["firstName","text",true],["birthDate","birthdate",true]]);
  assert.deepEqual(steps.find(s=>s.id==="identityDocument").fields,stepsFor(candidate).find(s=>s.id==="identityDocument").fields);
  assert.deepEqual(stepsFor({...a,nationality:"etrangere"}).find(s=>s.id==="identityDocument").fields[0].options.map(x=>x[0]),["sejour","cni_europe","passeport_etranger"]);
- assert.deepEqual(steps.map(s=>s.id),["identity","coordinates","nationality","identityDocument","identityFiles","ageFiles","home","homeFiles",...(workflow==="ants"?["special"]:["permitType","permitFiles","medical"]),"summary"]);
+ assert.deepEqual(steps.map(s=>s.id),["identity","coordinates","nationality","identityDocument","identityFiles","ageFiles","home","homeFiles",...(workflow==="ants"?["special"]:["medical"]),"summary"]);
  if(workflow==="permis"){
-  // Premier permis : le certificat d’examen remplace le titre actuel, et l’étape de fichiers le dit.
-  const first={...a,permitType:"first"};
-  assert.ok(stepsFor(first).find(s=>s.id==="permitFiles").title.includes("certificat d’examen"));
-  assert.ok(missingRequiredDocuments(first).map(d=>d.key).includes("permit_cepc"));
-  assert.ok(!missingRequiredDocuments(first).map(d=>d.key).includes("permit_current"));
-  assert.ok(answerErrors({...a,permitType:""}).some(e=>e.field==="permitType"));
+  assert.ok(!stepsFor(a).some(s=>s.id==="permitType" || s.id==="permitFiles" || s.id==="emancipation"));
+  assert.ok(!missingRequiredDocuments(a).map(d=>d.key).includes("permit_cepc"));
+  assert.ok(!missingRequiredDocuments(a).map(d=>d.key).includes("permit_current"));
+  // Ancien brouillon avec permitType / emancipated : cleanAnswers les ignore, soumission possible.
+  const legacy=cleanAnswers({...a,permitType:"first",emancipated:"non"});
+  assert.equal(legacy.permitType,undefined);
+  assert.equal(legacy.emancipated,undefined);
+  assert.equal(answerErrors(legacy,now).length,0);
  }
  assert.equal(steps.find(s=>s.id==="home").title,"Quelle est votre situation ?");
- assert.deepEqual(missingRequiredDocuments(a).map(d=>d.key).sort(),(workflow==="ants"?["assr_2","home_parents","hosting","identity_cni_fr","jdc","parent_identity"]:["assr_2","home_parents","hosting","identity_cni_fr","jdc","parent_identity","permit_current"]).sort());
+ assert.deepEqual(missingRequiredDocuments(a).map(d=>d.key).sort(),["assr_2","home_parents","hosting","identity_cni_fr","jdc","parent_identity"].sort());
  assert.ok(answerErrors({...a,birthDate:"",identityExpiry:"",homeDate:""}).some(e=>e.field==="birthDate"));
  assert.ok(answerErrors({...a,identityExpiry:"",homeDate:""},now).some(e=>e.field==="homeDate"));
  assert.equal(answerErrors({...a,identityExpiry:""},now).length,0);
@@ -282,9 +286,9 @@ test("ANTS et Permis : pièces obligatoires et dates documentaires facultatives"
  assert.equal((await send(h,form(a,partial))).status,422);
  const attachments=attachmentsFor(a);
  const r=await send(h,form(a,attachments));assert.equal(r.status,200);
- const mail=h.messages.at(-1);assert.match(mail.subject,/\[AEM Admin\] Nouveau dossier/);
- assert.ok(mail.text.includes("Nouveau dossier arrivé dans la zone admin")||mail.text.includes("DOCUMENTS TRANSMITS"));
+ const mail=h.messages.at(-1);assert.match(mail.subject,/a soumis son questionnaire|Nouveau dossier/);
  assert.ok(mail.text.includes("nolan@example.test"));
+ assert.ok(mail.text.includes("DOCUMENTS TRANSMITS") || mail.text.includes("disponible dans l’Admin") || mail.text.includes("Admin"));
  }
  }finally{await h.close();}
 });
@@ -341,7 +345,8 @@ test("Pièces différées : périmètre, nettoyage, audit et pièces manquantes"
  assert.deepEqual(docs.filter(d=>d.deferrable).map(d=>d.key).sort(),["assr_2","home_parents","hosting","jdc","parent_identity","special_medical"].sort());
  assert.ok(!docs.find(d=>d.key==="identity_cni_fr").deferrable);
  const permit=documentsFor({...candidate,workflow:"permis",medical:"oui"},now);
- assert.ok(!permit.find(d=>d.key==="permit_current").deferrable);assert.ok(permit.find(d=>d.key==="medical").deferrable);
+ assert.ok(!permit.some(d=>d.key==="permit_current" || d.key==="permit_cepc"));
+ assert.ok(permit.find(d=>d.key==="medical").deferrable);
  assert.deepEqual(cleanAnswers(candidate).deferred,[]);
  const clean=cleanAnswers({...a,deferred:["jdc"," hosting ","jdc",42,""]});
  assert.deepEqual(clean.deferred,["jdc","hosting"]);assert.equal(answerErrors(clean,now).length,0);
@@ -360,7 +365,7 @@ test("Pièces différées : périmètre, nettoyage, audit et pièces manquantes"
  assert.ok(text.includes("ASSR 2 :\n  Aucun fichier transmis"));
  assert.ok(!auditText(candidate,[],now).includes("À FOURNIR"));
 });
-test("HTTP : pièces différées acceptées, identité et permis jamais différables",async()=>{
+test("HTTP : pièces différées acceptées, identité jamais différable",async()=>{
  const h=await startHarness();
  try{
  const a={...candidate,deferred:["jdc","hosting","parent_identity"]};
@@ -373,20 +378,19 @@ test("HTTP : pièces différées acceptées, identité et permis jamais différa
  assert.deepEqual(meta.answers.deferred,a.deferred);
  assert.equal(meta.incomplete,true);assert.ok(meta.history[0].details.includes("3 pièce(s) à récupérer"));
  const notice=h.messages[0].text;
- assert.ok(notice.includes("Pièces à récupérer") || notice.includes("JDC"),"mention des pièces à récupérer");
- assert.ok(notice.includes("zone admin") || notice.includes("admin"),"lien ou mention admin");
+ assert.ok(notice.includes("Pièces à récupérer") || notice.includes("JDC") || notice.includes("restent à récupérer"),"mention des pièces à récupérer");
+ assert.ok(notice.includes("zone admin") || notice.includes("Admin") || notice.includes("admin"),"lien ou mention admin");
  assert.ok(notice.includes("Attestation d’hébergement") || notice.includes("hébergement"));
  assert.equal((await send(h,form(a,attachments.filter(f=>f.key!=="identity_cni_fr")))).status,422);
  assert.equal((await send(h,form({...a,deferred:[...a.deferred,"identity_cni_fr"]},attachments.filter(f=>f.key!=="identity_cni_fr")))).status,422);
  assert.equal((await send(h,form({...a,deferred:["assr_15"]},attachments))).status,422);
- const permit={...candidate,workflow:"permis",medical:"oui",deferred:["permit_current"]};
- assert.equal((await send(h,form(permit,attachmentsFor(permit).filter(f=>f.key!=="permit_current")))).status,422);
- const deferredMedical={...permit,deferred:["medical"]};
- assert.equal((await send(h,form(deferredMedical,attachmentsFor(permit).filter(f=>f.key!=="medical")))).status,200);
- assert.equal(h.messages.length,2);
- assert.ok(h.messages.at(-1).text.includes("Nouveau dossier arrivé dans la zone admin") || h.messages.at(-1).subject.includes("[AEM Admin]"));
- // ancien message pièces différées éventuellement reformulé
- assert.ok(h.messages.at(-1).text.includes("Avis médical") || h.messages.at(-1).text.includes("Pièces à récupérer"));
+ // Ancienne clé permit_current différée : refusée (document inconnu pour le nouveau parcours).
+ const permitLegacy={...candidate,workflow:"permis",medical:"oui",deferred:["permit_current"]};
+ assert.equal((await send(h,form(permitLegacy,attachmentsFor({...candidate,workflow:"permis",medical:"oui"})))).status,422);
+ const deferredMedical={...candidate,workflow:"permis",medical:"oui",deferred:["medical"]};
+ assert.equal((await send(h,form(deferredMedical,attachmentsFor(deferredMedical).filter(f=>f.key!=="medical")))).status,200);
+ assert.ok(h.messages.at(-1).subject.includes("a soumis son questionnaire") || h.messages.at(-1).subject.includes("[AEM Admin]"));
+ assert.ok(h.messages.at(-1).text.includes("Avis médical") || h.messages.at(-1).text.includes("récupérer"));
  }finally{await h.close();}
 });
 

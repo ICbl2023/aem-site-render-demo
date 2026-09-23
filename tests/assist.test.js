@@ -134,11 +134,8 @@ test("chat-server : parseReply ne renvoie jamais du JSON brut, normalizeMessages
  assert.equal(normalizeMessages([{role:"user",content:"x".repeat(1500)}])[0].content.length,1000);
 });
 
-test("Extraction : type de demande du parcours Permis (premier permis / renouvellement)",()=>{
+test("Extraction : parcours Permis sans permitType",()=>{
  const permis=catalog({...candidate,workflow:"permis",birthDate:"2000-03-12",home:"own",medical:"non"});
- const pf=permis.flatMap(s=>s.fields);
- const kp=permis.find(s=>s.id==="permitType").fields.map(f=>f.key);
- const x=t=>localExtract(t,pf,kp,["permitType"]).permitType;
- for(const t of ["premier permis","j’ai réussi l’examen","c’est mon premier permis, j’ai le certificat","cepc"])assert.equal(x(t),"first",t);
- for(const t of ["renouvellement","j’ai perdu mon permis","mon permis est abîmé","renouveler mon permis actuel"])assert.equal(x(t),"renewal",t);
+ assert.ok(!permis.some(s=>s.id==="permitType" || s.id==="permitFiles" || s.id==="emancipation"));
+ assert.ok(permis.some(s=>s.id==="medical"));
 });

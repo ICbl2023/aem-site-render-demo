@@ -5,7 +5,7 @@ const card=document.querySelector("#question-card");
 const workflow=document.documentElement.dataset.workflow;
 const welcomeInfo={
  ants:{title:"Votre dossier ANTS",why:"Vous préparez votre dossier de conduite auprès de l’Agence nationale des titres sécurisés : inscription au permis, échange ou demande liée à votre formation. AEM rassemble vos informations et vos pièces, puis dépose la démarche pour vous.",docs:["Pièce d’identité (recto et verso)","Justificatif de domicile de moins de 6 mois","ASSR, recensement ou JDC selon votre âge"]},
- permis:{title:"Votre dossier Permis",why:"Vous demandez la fabrication ou le renouvellement de votre permis de conduire. AEM vérifie vos pièces avec vous avant de transmettre la demande.",docs:["Pièce d’identité","Certificat d’examen (CEPC) pour un premier permis, ou permis actuel pour un renouvellement","Justificatif de domicile de moins de 6 mois","Avis médical si votre situation le demande"]}
+ permis:{title:"Votre dossier Permis",why:"",docs:["Pièce d’identité","Justificatif de domicile de moins de 6 mois","Avis médical si votre situation le demande"]}
 };
 let answers={workflow},files=new Map(),current="welcome",busy=false,sending=false,completed=false;
 let lastMilestone=0,drafts,draftMissing=[],draftId=newSubmissionId();
@@ -218,6 +218,26 @@ function refreshDocuments(){
  shotLabel.htmlFor="shot-"+doc.key;
  const shot=el("input","file-input");shot.id=shotLabel.htmlFor;shot.type="file";shot.accept="image/*";shot.setAttribute("capture","environment");shot.setAttribute("aria-label","Prendre en photo : "+doc.label);
  shot.addEventListener("change",()=>{ingestFiles(shot.files);shot.value="";});
+ const isFileDrag=dt=>{
+  if(!dt)return false;
+  const types=dt.types?Array.from(dt.types):[];
+  if(types.includes("Files") || types.includes("application/x-moz-file"))return true;
+  if(dt.items && dt.items.length)return Array.from(dt.items).some(it=>it.kind==="file");
+  return false;
+ };
+ // Dépôt discret depuis l’Explorateur : même pipeline que le sélecteur, sans zone ni texte dédiés.
+ for(const type of ["dragenter","dragover"]){
+  article.addEventListener(type,e=>{
+   if(!isFileDrag(e.dataTransfer))return;
+   e.preventDefault();e.stopPropagation();
+   if(type==="dragover")try{e.dataTransfer.dropEffect="copy";}catch{}
+  });
+ }
+ article.addEventListener("drop",e=>{
+  if(!isFileDrag(e.dataTransfer))return;
+  e.preventDefault();e.stopPropagation();
+  ingestFiles(e.dataTransfer?.files);
+ });
  const uploadRow=el("div","upload-row");uploadRow.append(uploadLabel,input,shotLabel,shot);
  article.append(uploadRow,el("p","validation-hint upload-hint","Photographiez la pièce maintenant : à plat, bien cadrée, sans flash ni reflet. Un PDF fait aussi l’affaire."),uploadError);
  if(doc.deferrable && !(files.get(doc.key)||[]).length){
@@ -308,7 +328,7 @@ function renderWelcome(container){
  const info=welcomeInfo[workflow]||welcomeInfo.ants;
  container.append(el("span","eyebrow","Avant de commencer"));
  const h=el("h1","",info.title);h.tabIndex=-1;container.append(h);
- container.append(el("p","lead",info.why));
+ if(info.why)container.append(el("p","lead",info.why));
  const list=el("ul","welcome-checklist");
  info.docs.forEach(text=>list.append(el("li","",text)));
  container.append(el("p","field-label","Préparez ces éléments (photos ou PDF) :"),list);

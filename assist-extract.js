@@ -23,8 +23,7 @@ export const SYNONYMS={
  identityDocument:[[/europ[ée]|italien|espagnol|allemand|portugais|belge|suisse/,"cni_europe"],[CNI,"cni_fr"],[CNI,"cni_origine"],[/s[ée]jour/,"sejour"]],
  europeSituation:[[/[ée]tudiant/,"student"],[/salari|[ée]mploi|travaille|travail/,"worker"]],
  homeProof:[[/imp[oô]t|imposition/,"impot"],[/quittance|loyer/,"loyer"],[/facture/,"facture"]],
- specialReason:[[/(?:^|\s)autre(?![a-zà-ÿ])/,"other"],[/m[ée]dic/,"medical"],[/handicap|affection/,"handicap"],[/d[ée]j[àa]|existant|existe/,"existing"]],
- permitType:[[/renouvel|duplicata|perdu|vol[ée]|ab[iî]m|mettre [àa] jour|actuel/,"renewal"],[/premier permis|nouveau permis|r[ée]ussi|cepc|certificat|premi[eè]re demande|(?:^|\s)premier(?![a-zà-ÿ])/,"first"]]
+ specialReason:[[/(?:^|\s)autre(?![a-zà-ÿ])/,"other"],[/m[ée]dic/,"medical"],[/handicap|affection/,"handicap"],[/d[ée]j[àa]|existant|existe/,"existing"]]
 };
 
 export function isoDate(d,m,y){if(y<100)y+=y<30?2000:1900;if(m<1||m>12||d<1||d>31)return "";return String(y)+"-"+String(m).padStart(2,"0")+"-"+String(d).padStart(2,"0");}

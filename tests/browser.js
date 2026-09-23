@@ -2,7 +2,7 @@ import {chromium} from "playwright";
 import assert from "node:assert/strict";
 import {mkdir,writeFile,readFile} from "node:fs/promises";
 import {startHarness,png,pdf,heic,candidate} from "./helpers.js";
-import {stepsFor,cleanAnswers,subjectFor,dateInputValue,documentsFor,limits} from "../logic.js";
+import {stepsFor,cleanAnswers,dateInputValue,documentsFor,limits} from "../logic.js";
 const h=await startHarness({port:4173});
 let browser;
 const results=[],errors=[];
@@ -27,8 +27,9 @@ try{
  });
  await page.goto(h.url+"/"+workflow+".html");
  assert.equal(await page.locator('input[name="workflow"]').count(),0);
- assert.equal(await page.locator("#journey-title").innerText(),workflow==="ants"?"ANTS":"Permis");
- const choose=async(key,value)=>page.locator('input[name="'+key+'"][value="'+value+'"]').check();
+ assert.equal(await page.locator("#journey-title").evaluate(n=>n.textContent.trim()),workflow==="ants"?"ANTS":"Permis");
+ await page.getByRole("button",{name:/Commencer mon dossier/i}).click();
+ const choose=async(key,value)=>{await page.locator("label.choice-card").filter({has:page.locator('input[name="'+key+'"][value="'+value+'"]')}).click();};
  const title=()=>page.locator("h1").innerText();
  const waitTitle=async text=>page.waitForFunction(expected=>document.querySelector("h1")?.textContent===expected,text);
  const next=async expected=>{await page.locator("#next-button").click();await waitTitle(expected);};
@@ -61,7 +62,7 @@ try{
  if(f.type==="choice")await choose(f.key,a[f.key]);
  else if(["birthdate","date","month"].includes(f.type)){
  const input=page.locator("#field-"+f.key);
- assert.equal(await input.getAttribute("type"),"text");assert.equal(await input.getAttribute("required"),f.type==="birthdate"?"":null);
+ assert.equal(await input.getAttribute("type"),"text");assert.equal(await input.getAttribute("required"),f.required?"":null);
  const picker=page.locator("#field-"+f.key+"-calendar");
  assert.equal(await picker.getAttribute("type"),f.type==="month"?"month":"date");
  if(f.type==="birthdate"){
@@ -101,6 +102,7 @@ try{
  a.homeDate="2025";
  }else{
  assert.equal(await input.getAttribute("placeholder"),"MM/AAAA");
+ await input.fill("");
  await input.pressSequentially("08");assert.equal(await input.inputValue(),"08/");await input.pressSequentially("2026");assert.equal(await picker.inputValue(),"2026-08");
  a.homeDate="2026-08";
  }
@@ -121,19 +123,19 @@ try{
  await date.press("Enter");assert.equal(await title(),s.title);
  assert.equal(await page.locator("#documents-required-error").isVisible(),true);
  assert.equal(await page.locator(".defer-choice").count(),0,"le document d’identité n’est jamais différable");
- await page.locator('input[type="file"]').setInputFiles([{name:"IMG_4827.HEIC",mimeType:"image/heic",buffer:heic},{name:"recto été.png",mimeType:"image/png",buffer:png}]);
+ await page.locator('input[type="file"][id^="upload-"]').setInputFiles([{name:"IMG_4827.HEIC",mimeType:"image/heic",buffer:heic},{name:"recto été.png",mimeType:"image/png",buffer:png}]);
  assert.equal(await page.locator(".file-row").count(),2);
  await page.locator(".file-remove").first().click();assert.equal(await page.locator(".file-row").count(),1);
  if(workflow==="ants"&&minor){
  const before=await page.locator(".file-row").count(),large=Buffer.alloc(9*1024*1024);pdf.copy(large);
- await page.locator('input[type="file"]').setInputFiles([{name:"grand1.pdf",mimeType:"application/pdf",buffer:large},{name:"grand2.pdf",mimeType:"application/pdf",buffer:large}]);
+ await page.locator('input[type="file"][id^="upload-"]').setInputFiles([{name:"grand1.pdf",mimeType:"application/pdf",buffer:large},{name:"grand2.pdf",mimeType:"application/pdf",buffer:large}]);
  assert.equal(await page.locator(".file-row").count(),before);
  assert.ok((await page.locator(".upload-card .field-error").innerText()).includes("dépasse"));
  }
  }
  if(s.id==="home"){assert.equal(await title(),"Quelle est votre situation ?");}
  if(s.id==="ageFiles"){
- assert.deepEqual(await page.locator('input[type="file"]').evaluateAll(ns=>ns.map(n=>n.id)),minor?["upload-assr_2","upload-recensement"]:["upload-assr_2"]);
+ assert.deepEqual(await page.locator('input[type="file"][id^="upload-"]').evaluateAll(ns=>ns.map(n=>n.id)),minor?["upload-assr_2","upload-recensement","upload-jdc"]:["upload-assr_2"]);
  assert.equal(await page.locator("#next-button").isDisabled(),true,"pièce d’âge obligatoire sans fichier ni report");
  // Report d'une pièce : #defer-jdc si la JDC est attendue (Français de 17 à 24 ans), sinon la première case de report disponible.
  const deferIds=await page.locator(".defer-choice input").evaluateAll(ns=>ns.map(n=>n.id));
@@ -146,9 +148,9 @@ try{
  assert.ok((await card.locator(".file-status").innerText()).includes("Non fournie — AEM vous recontactera"));
  if(!minor)assert.equal(await page.locator("#next-button").isEnabled(),true,"le report lève le blocage");
  }
- if(s.id==="permitFiles")assert.equal(await page.locator("#next-button").isDisabled(),true);
+ if(s.id==="permitFiles")assert.fail("étape permitFiles retirée du parcours Permis");
  if(s.documentGroup&&s.id!=="identityFiles"){
- const inputs=page.locator('input[type="file"]');
+ const inputs=page.locator('input[type="file"][id^="upload-"]');
  for(let n=0;n<await inputs.count();n++){
  const input=inputs.nth(n);
  if(await input.getAttribute("id")==="upload-"+deferredKey)continue; // ajouter un fichier annulerait le report
@@ -158,13 +160,16 @@ try{
  assert.equal(await page.locator("#next-button").isEnabled(),true,s.id+" : dates vides autorisées");
  await responsive();
  if(s.id==="homeFiles")await page.screenshot({path:"test-results/"+workflow+"-"+profile+"-mobile.png",fullPage:true});
- const text=page.locator('input[type="text"],input[type="email"],input[type="tel"]').first();
+ const text=page.locator('#question-card input[type="text"],#question-card input[type="email"],#question-card input[type="tel"]').first();
  if(await text.count()){await text.press("Enter");await waitTitle(path[i+1].title);}
  else await next(path[i+1].title);
  }
- const expectedStart=["identity","coordinates","nationality",...(minor&&workflow==="permis"?["emancipation"]:[]),"identityDocument","identityFiles","ageFiles"];
+ const expectedStart=["identity","coordinates","nationality","identityDocument","identityFiles","ageFiles"];
  assert.deepEqual(observed.slice(0,expectedStart.length),expectedStart);
  assert.equal(observed.includes("contact"),minor);assert.ok(observed.includes("ageFiles"));
+ assert.ok(!observed.includes("emancipation"));
+ assert.ok(!observed.includes("permitType"));
+ assert.ok(!observed.includes("permitFiles"));
  await responsive();
  assert.ok((await page.locator(".summary-panel").innerText()).includes("Non fournie — AEM vous recontactera"),"pièce différée signalée dans le récapitulatif");
  const identitySummary=page.locator(".summary-group").filter({has:page.getByRole("heading",{name:"Ajoutez votre document d’identité",exact:true})});
@@ -185,9 +190,9 @@ try{
  const successText=await page.locator("#question-card").innerText();
  const payload=await page.evaluate(()=>window.testPayload);
  const deferredLabels=(a.deferred||[]).map(key=>documentsFor(a).find(d=>d.key===key).label);
- const mail=h.messages.at(-1);assert.equal(mail.subject,"[AEM Admin] Nouveau dossier — "+subjectFor(a));
- assert.ok(mail.text.includes("Nouveau dossier arrivé dans la zone admin"),"notification sans pièces jointes (AEM_MAIL_ATTACHMENTS=0)");
- assert.equal(mail.text.includes("Pièces à récupérer"),deferredLabels.length>0);
+ const mail=h.messages.at(-1);assert.match(mail.subject,/a soumis son questionnaire/);
+ assert.ok(mail.text.includes("disponible dans l’Admin") || mail.text.includes("Nouveau dossier arrivé"),"notification sans pièces jointes (AEM_MAIL_ATTACHMENTS=0)");
+ assert.equal(mail.text.includes("pièces restent à récupérer") || mail.text.includes("Pièces à récupérer"),deferredLabels.length>0);
  assert.equal(successText.includes("AEM vous recontactera pour récupérer"),deferredLabels.length>0);
  for(const label of deferredLabels){assert.ok(mail.text.includes(label));assert.ok(successText.includes(label));}
  const meta=JSON.parse(await readFile(h.dataDir+"/"+payload.submissionId+"/meta.json","utf8"));
@@ -210,15 +215,16 @@ try{
  await page.route("**/api/config",r=>r.fulfill({status:404,body:"Not found"}));
  let attempts=0;await page.route("**/api/submit",r=>{attempts++;return r.abort();});
  await page.goto(h.url+"/ants.html");
- const a={...candidate,home:"own",birthDate:"1990-01-01",identityExpiry:"",homeDate:""}; // 36 ans : aucune pièce liée à l'âge
+ await page.getByRole("button",{name:/Commencer mon dossier/i}).click();
+ const a={...candidate,home:"own",birthDate:"1990-01-01",identityExpiry:"",homeDate:"2026-08"}; // 36 ans : aucune pièce liée à l'âge
  for(const s of stepsFor(a).filter(s=>s.id!=="summary")){
  await page.getByRole("heading",{name:s.title,exact:true}).waitFor();
  for(const f of s.fields){
- if(f.type==="choice")await page.locator('input[name="'+f.key+'"][value="'+a[f.key]+'"]').check();
+ if(f.type==="choice")await page.locator("label.choice-card").filter({has:page.locator('input[name="'+f.key+'"][value="'+a[f.key]+'"]')}).click();
  else await page.locator("#field-"+f.key).fill(["birthdate","date","month"].includes(f.type)?dateInputValue(a[f.key]||"",f.type==="month"?"month":"date"):a[f.key]||"");
  }
  if(s.documentGroup){
- const inputs=page.locator('input[type="file"]');
+ const inputs=page.locator('input[type="file"][id^="upload-"]');
  for(let n=0;n<await inputs.count();n++)await inputs.nth(n).setInputFiles({name:s.id+"-"+n+".pdf",mimeType:"application/pdf",buffer:pdf});
  }
  await page.locator("#next-button").click();
