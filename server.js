@@ -6,7 +6,6 @@ import path from "node:path";
 import {fileURLToPath} from "node:url";
 import {createHash} from "node:crypto";
 import Busboy from "busboy";
-import nodemailer from "nodemailer";
 import {config as defaultConfig} from "./server-config.js";
 import {cleanAnswers,answerErrors,documentsFor,auditText,subjectFor,acceptedExtensions,missingRequiredDocuments,deferredDocuments,isDeferred,workflows} from "./logic.js";
 import {createStorage,dossierStatuses,historyActions,adminNotifyStates,isSubmissionId,STALE_AFTER_DAYS,fileDownloadName} from "./storage.js";
@@ -16,6 +15,8 @@ import {createBlobStoreFromConfig} from "./blob-store.js";
 import {DRAFT_DAYS} from "./drafts.js";
 import {createAdminAuth} from "./admin-auth.js";
 import {createChat} from "./chat-server.js";
+import {createEmailTransport,createMailTransport,resolveEmailProvider,qualifyMailError,formatEmailAddress,extractAddress} from "./email-transport.js";
+export {createMailTransport,createEmailTransport,qualifyMailError,formatEmailAddress} from "./email-transport.js";
 const root=path.dirname(fileURLToPath(import.meta.url));
 const staticFiles=new Map([
  ["","portail.html"],["ants.html","ants.html"],["permis.html","permis.html"],["portail.html","portail.html"],
@@ -226,14 +227,6 @@ export function prepareMail(submission,config,{adminUrl=null,attachments=false}=
  disableFileAccess:true,disableUrlAccess:true
  };
 }
-export function createMailTransport(config){
- return nodemailer.createTransport({
- host:config.smtpHost,port:config.smtpPort,secure:config.smtpPort===465,requireTLS:config.smtpPort!==465,
- ...(config.smtpUser?{auth:{user:config.smtpUser,pass:config.smtpPass}}:{}),
- connectionTimeout:15000,greetingTimeout:15000,socketTimeout:45000,
- disableFileAccess:true,disableUrlAccess:true
- });
-}
 async function readBody(req,max=8192){
  const chunks=[];let size=0;
  for await(const chunk of req){
@@ -259,10 +252,20 @@ export function createApp(options={}){
  const draftStorage=draftsEnabled?(options.draftStorage || createDraftStorage(path.resolve(root,config.draftDir),blobs?{blobs}:{})):null;
  const auth=createAdminAuth(config);
  const chat=createChat({config,dataDir:path.resolve(root,config.dataDir)});
- const mailEnabled=Boolean(config.smtpHost && config.from && config.recipient);
+ let mailEnabled=false,emailProvider="disabled",transport=null,emailConfigError=null;
+ if(demo){
+  transport=null;
+ }else if(options.transport){
+  transport=options.transport;mailEnabled=true;emailProvider=String(options.transport.provider||"custom");
+ }else{
+  try{
+   const resolved=resolveEmailProvider(config);
+   mailEnabled=resolved.mailEnabled;emailProvider=resolved.provider;
+   if(mailEnabled)transport=createEmailTransport(config,{endpoint:options.resendEndpoint,fetch:options.resendFetch});
+  }catch(e){emailConfigError=e;mailEnabled=false;emailProvider="disabled";transport=null;console.error("Messagerie non démarrée :",e.message||e);}
+ }
  const storageEnabled=Boolean(config.dataDir);
- const enabled=Boolean(demo || options.transport || (config.origin && (mailEnabled || storageEnabled)));
- const transport=demo?null:options.transport || (mailEnabled?createMailTransport(config):null);
+ const enabled=Boolean(demo || transport || (config.origin && (mailEnabled || storageEnabled)));
  const rates=new Map(),inflight=new Set(),ackRates=new Map();let active=0;
  const requestInflight=new Set(),notifyInflight=new Set();
  const ACK_MAX=3,ACK_WINDOW_MS=24*60*60*1000;
@@ -317,21 +320,145 @@ export function createApp(options={}){
   await draftStorage.remove(token).catch(()=>{});
  }
  async function sendTo(mail,address){
+ if(!transport)throw fail(503,"Messagerie non configurée.");
  const result=await transport.sendMail(mail);
- if(!result.accepted?.some(a=>String(a).toLowerCase()===address.toLowerCase()))throw fail(502,"Le serveur de messagerie n’a pas accepté le destinataire.");
+ const want=String(address||"").trim().toLowerCase();
+ const accepted=(result.accepted||[]).map(a=>String(a).toLowerCase());
+ if(want && !accepted.some(a=>a===want || a.includes("<"+want+">") || extractAddress(a)===want)){
+  throw fail(502,"Le serveur de messagerie n’a pas accepté le destinataire.");
+ }
  return result;
  }
- async function markAdminNotify(id,state,details=""){
-  return storage.update(id,{adminNotify:state},{by:"système",...(details?{action:"admin_notify",details}:{})});
+ async function markAdminNotify(id,state,details="",extraPatch={}){
+  return storage.update(id,{adminNotify:state,...extraPatch},{by:"système",...(details?{action:"admin_notify",details}:{})});
+ }
+ function envelopeFingerprint(envelope){
+  return createHash("sha256").update([
+   envelope.subject||"",envelope.text||"",envelope.html||"",
+   envelope.from||"",envelope.to||"",
+   envelope.replyTo?.address||"",envelope.replyTo?.name||"",
+   (envelope.deferredLabels||[]).join("|"),
+   String(Boolean(envelope.attachmentsEnabled)),
+   (envelope.attachmentNames||[]).join("|")
+  ].join("\n")).digest("hex");
+ }
+ function buildAdminNotifyEnvelope(submission){
+  const id=submission.submissionId||submission.id;
+  const uploads=Array.isArray(submission.uploads)?submission.uploads:[];
+  const attachments=Boolean(config.mailAttachments && uploads.length);
+  const mail=prepareMail({submissionId:id,answers:submission.answers||{},uploads},config,{
+   adminUrl:dossierAdminUrl(adminBase,id),attachments
+  });
+  const deferred=deferredDocuments(submission.answers||{},uploads);
+  return {
+   subject:mail.subject,text:mail.text,html:mail.html||"",
+   from:formatEmailAddress(mail.from||config.from),
+   to:formatEmailAddress(mail.to||config.recipient),
+   replyTo:mail.replyTo&&typeof mail.replyTo==="object"
+    ?{address:String(mail.replyTo.address||""),name:String(mail.replyTo.name||"")}
+    :{address:String(mail.replyTo||""),name:""},
+   deferredLabels:deferred.map(d=>d.label),
+   attachmentsEnabled:attachments,
+   attachmentNames:attachments?uploads.map(f=>f.name):[]
+  };
+ }
+ function mailFromAdminEnvelope(envelope,idempotencyKey){
+  const mail={
+   from:envelope.from||config.from,
+   to:envelope.to||config.recipient,
+   subject:envelope.subject,
+   text:envelope.text,
+   replyTo:envelope.replyTo?.address
+    ?{address:envelope.replyTo.address,name:envelope.replyTo.name||""}
+    :undefined,
+   disableFileAccess:true,disableUrlAccess:true,
+   idempotencyKey,
+   headers:{"Idempotency-Key":idempotencyKey}
+  };
+  if(envelope.html)mail.html=envelope.html;
+  // Pièces : non rechargées ici (AEM_MAIL_ATTACHMENTS=0 par défaut). Si activées sans contenu, on refuse plutôt que d’altérer le texte.
+  if(envelope.attachmentsEnabled){
+   const err=fail(409,"Reconstruction des pièces jointes impossible pour ce renvoi : contenu non conservé dans les métadonnées.");
+   err.code="attachment_rebuild";throw err;
+  }
+  return mail;
+ }
+ // Envoi notification admin protégé (concurrence initiale + retry), avec enveloppe stable pour Resend.
+ async function deliverAdminNotification(dossierId,{submission=null,by="système",force=false}={}){
+  if(!transport || !config.from || !config.recipient){
+   const err=fail(503,"Messagerie non configurée.");err.code="EMAIL_CONFIG";throw err;
+  }
+  if(notifyInflight.has(dossierId)){
+   const err=fail(409,"Une notification est déjà en cours d’envoi pour ce dossier.");throw err;
+  }
+  notifyInflight.add(dossierId);
+  try{
+   let meta=await storage.get(dossierId);
+   if(!meta)throw fail(404,"Dossier introuvable.");
+   const state=meta.adminNotify||"";
+   if(state==="sent" && !force)throw fail(409,"La notification admin a déjà été envoyée pour ce dossier.");
+   if(state==="sending")throw fail(409,"Une notification est déjà en cours d’envoi pour ce dossier.");
+
+   let envelope=null;
+   let idempotencyKey=meta.adminNotifyIdempotencyKey||("aem-admin-notify/"+dossierId);
+   let opId=meta.adminNotifyOpId||dossierId;
+   if(meta.adminNotifyEnvelope?.subject && meta.adminNotifyEnvelope?.text){
+    envelope=meta.adminNotifyEnvelope;
+   }else{
+    if(!submission){
+     submission={submissionId:dossierId,answers:meta.answers||{},uploads:[]};
+    }
+    envelope=buildAdminNotifyEnvelope(submission);
+   }
+   const fp=envelopeFingerprint(envelope);
+   const nowIso=new Date().toISOString();
+   const started=await storage.update(dossierId,{
+    adminNotify:"sending",
+    adminNotifyOpId:opId,
+    adminNotifyProvider:emailProvider||transport.provider||"",
+    adminNotifyIdempotencyKey:idempotencyKey,
+    adminNotifyFingerprint:fp,
+    adminNotifyEnvelope:envelope,
+    adminNotifyLastAttemptAt:nowIso
+   },{by}); // pas d’entrée d’historique pour « sending » (évite le bruit ; l’historique conserve sent/failed/uncertain)
+   if(!started)throw fail(500,"Impossible d’enregistrer l’état d’envoi de la notification.");
+
+   meta=await storage.get(dossierId);
+   if(!meta)throw fail(404,"Dossier introuvable.");
+   if(meta.adminNotify==="sent")throw fail(409,"La notification admin a déjà été envoyée pour ce dossier.");
+
+   const mail=mailFromAdminEnvelope(envelope,idempotencyKey);
+   let result;
+   try{
+    result=await sendTo(mail,config.recipient);
+   }catch(e){
+    const q=qualifyMailError(e);
+    await markAdminNotify(dossierId,q.state,(q.state==="uncertain"?"Résultat de notification admin incertain : ":"Échec notification admin : ")+q.message).catch(()=>{});
+    throw e;
+   }
+   const providerId=result.messageId||result.id||"";
+   try{
+    const updated=await markAdminNotify(
+     dossierId,
+     "sent",
+     "Notification admin envoyée à "+config.recipient+(by && by!=="système"?" (par "+by+")":""),
+     {adminNotifyProviderId:String(providerId||""),adminNotifyProvider:emailProvider||transport.provider||"",adminNotifySentAt:new Date().toISOString()}
+    );
+    return {updated,result};
+   }catch(storeErr){
+    await markAdminNotify(
+     dossierId,
+     "uncertain",
+     "Notification probablement acceptée par le fournisseur, mais l’état local n’a pas pu être confirmé"+(providerId?" (id "+providerId+")":"")
+    ).catch(()=>{});
+    const err=fail(502,"Acceptation fournisseur non confirmée localement.");
+    err.uncertain=true;err.code="LOCAL_STATE";throw err;
+   }
+  }finally{notifyInflight.delete(dossierId);}
  }
  async function sendAdminNotification(submission){
   const id=submission.submissionId||submission.id;
-  const payload={
-   submissionId:id,
-   answers:submission.answers||{},
-   uploads:Array.isArray(submission.uploads)?submission.uploads:[]
-  };
-  await sendTo(prepareMail(payload,config,{adminUrl:dossierAdminUrl(adminBase,id),attachments:Boolean(config.mailAttachments && payload.uploads.length)}),config.recipient);
+  return deliverAdminNotification(id,{submission,by:"système"});
  }
  // Au démarrage : une notification restée « sending » devient « uncertain » (pas de renvoi auto — évite les doublons).
  async function settleInterruptedNotifications(){
@@ -626,21 +753,21 @@ export function createApp(options={}){
   if(!meta)return json(res,404,{error:"Dossier introuvable."});
   const state=meta.adminNotify||"";
   if(state==="sent")return json(res,409,{error:"La notification admin a déjà été envoyée pour ce dossier."});
-  if(!["failed","uncertain","pending"].includes(state))return json(res,409,{error:"Aucune reprise de notification n’est nécessaire pour ce dossier."});
+  if(state==="sending")return json(res,409,{error:"Une notification est déjà en cours d’envoi pour ce dossier."});
+  if(!["failed","uncertain","pending","skipped"].includes(state))return json(res,409,{error:"Aucune reprise de notification n’est nécessaire pour ce dossier."});
   if(!transport || !config.from || !config.recipient)return json(res,503,{error:"Messagerie non configurée : la notification ne peut pas être renvoyée."});
-  if(notifyInflight.has(meta.id))return json(res,409,{error:"Une notification est déjà en cours d’envoi pour ce dossier."});
-  notifyInflight.add(meta.id);
   try{
-   await markAdminNotify(meta.id,"sending");
-   try{
-    await sendAdminNotification({submissionId:meta.id,answers:meta.answers||{},uploads:[]});
-    const updated=await markAdminNotify(meta.id,"sent","Notification admin renvoyée à "+config.recipient+" (par "+session.user+")");
-    return json(res,200,{dossier:{...withWorkflowLabel(updated),expiresAt:expiresAtOf(updated)},ok:true,sent:true});
-   }catch(e){
-    const updated=await markAdminNotify(meta.id,"failed","Échec du renvoi de notification admin : "+(e.message||"erreur"));
-    return json(res,502,{error:"La notification n’a pas pu être renvoyée."+(e.message?" "+e.message:""),dossier:{...withWorkflowLabel(updated),expiresAt:expiresAtOf(updated)}});
+   const {updated}=await deliverAdminNotification(meta.id,{by:session.user});
+   return json(res,200,{dossier:{...withWorkflowLabel(updated),expiresAt:expiresAtOf(updated)},ok:true,sent:true});
+  }catch(e){
+   const q=qualifyMailError(e);
+   const latest=await storage.get(meta.id).catch(()=>null);
+   const dossier=latest?{...withWorkflowLabel(latest),expiresAt:expiresAtOf(latest)}:undefined;
+   if(q.state==="uncertain" || e.uncertain){
+    return json(res,409,{error:"Résultat d’envoi incertain : le fournisseur a peut‑être déjà accepté le message. Vérifiez la boîte admin avant de renvoyer, pour éviter un doublon."+(e.message?" "+e.message:""),dossier,uncertain:true});
    }
-  }finally{notifyInflight.delete(meta.id);}
+   return json(res,e.status&&e.status>=400&&e.status<600?e.status:502,{error:"La notification n’a pas pu être renvoyée."+(e.message?" "+e.message:""),dossier});
+  }
  }catch(e){return json(res,e.status||400,{error:e.message||"Requête invalide."});}
  }
  const freeMail=route.match(/^api\/admin\/dossiers\/([a-f0-9-]+)\/mail$/);
@@ -768,20 +895,14 @@ export function createApp(options={}){
  // À partir d’ici le dossier est accepté pour le candidat : la notification Admin ne doit plus faire échouer la réponse HTTP.
  stored=true;
  if(transport){
-  await markAdminNotify(id,"sending").catch(()=>{});
   try{
-   await sendAdminNotification(submission);
-   await markAdminNotify(id,"sent","Notification admin envoyée à "+config.recipient);
+   await deliverAdminNotification(id,{submission,by:"système"});
   }catch(e){
-   const ambiguous=e.uncertain===true || /^(ETIMEDOUT|ESOCKET|ECONNECTION|ECONNRESET|EENVELOPE)$/i.test(String(e.code||""));
-   await markAdminNotify(
-    id,
-    ambiguous?"uncertain":"failed",
-    (ambiguous?"Résultat de notification admin incertain : ":"Échec notification admin : ")+(e.message||"erreur")
-   ).catch(()=>{});
+   // État failed/uncertain déjà posé par deliverAdminNotification ; la soumission reste 200.
   }
  }else{
-  await markAdminNotify(id,"skipped","Notification admin non configurée").catch(()=>{});
+  const reason=emailConfigError?.message||"Notification admin non configurée";
+  await markAdminNotify(id,"skipped",reason).catch(()=>{});
  }
  await acknowledgeCandidate(submission).catch(()=>{});
  await consumeDraft(req);

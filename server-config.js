@@ -4,6 +4,10 @@ export const config = {
  standalone: process.env.AEM_STANDALONE === "1",
  recipient: process.env.AEM_RECIPIENT || "",
  from: process.env.AEM_FROM || "",
+ // smtp | resend | disabled | vide (= SMTP historique si SMTP_HOST+FROM+RECIPIENT)
+ emailProvider: process.env.AEM_EMAIL_PROVIDER || "",
+ resendApiKey: process.env.RESEND_API_KEY || "",
+ emailTimeoutMs: Number(process.env.AEM_EMAIL_TIMEOUT_MS || 15000),
  smtpHost: process.env.SMTP_HOST || "",
  smtpPort: Number(process.env.SMTP_PORT || 587),
  smtpUser: process.env.SMTP_USER || "",

@@ -226,22 +226,53 @@ ne pas supprimer les reçus pour tenter un nouvel envoi.
 
 ## Configuration de l’email
 
-Le destinataire par défaut est centralisé dans server-config.js. L’adresse prévue
-reste celle décidée par AEM ; AEM_RECIPIENT permet de la modifier côté serveur.
+Le destinataire interne des notifications admin est `AEM_RECIPIENT` (prévu :
+`aemseve@gmail.com`). L’expéditeur `AEM_FROM` doit être une adresse autorisée par
+le fournisseur. Chez Resend, **ne pas** utiliser `aemseve@gmail.com` comme From :
+utiliser une adresse sur un **domaine AEM vérifié** (DNS). Les mails candidats
+conservent un Reply-To vers Gmail AEM ; les notifications internes gardent le
+Reply-To du candidat.
 
-Copier .env.example vers .env localement, ou renseigner les variables dans le
-panneau privé de l’hébergement :
-- AEM_FROM : expéditeur autorisé par le relais SMTP.
-- SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS : accès au relais.
-- AEM_ORIGIN : origine publique exacte, sans chemin ni slash final.
-- AEM_BASE_PATH : vide à la racine, ou chemin du sous-dossier.
-- HOST et PORT : interface et port du serveur.
-- AEM_RECEIPT_DIR : emplacement privé et persistant des reçus.
+### Fournisseur (`AEM_EMAIL_PROVIDER`)
 
-Port 465 : TLS ; autres ports : STARTTLS obligatoire.
-Ne jamais mettre ces secrets dans les pages ou le JavaScript public.
-Sans configuration serveur, l’envoi reste désactivé et aucune confirmation fictive
-n’est affichée. Une acceptation SMTP ne prouve pas l’arrivée dans la boîte Gmail.
+| Valeur | Comportement |
+|--------|----------------|
+| *(vide)* | SMTP historique si `SMTP_HOST` + `AEM_FROM` + `AEM_RECIPIENT` |
+| `smtp` | SMTP obligatoire (variables SMTP requises) |
+| `resend` | API HTTPS Resend (`RESEND_API_KEY`, `AEM_FROM`, `AEM_RECIPIENT`) |
+| `disabled` | Aucun envoi |
+
+Pas de bascule silencieuse d’un fournisseur vers un autre.
+
+Variables Resend (Render Free recommandé) :
+- `AEM_EMAIL_PROVIDER=resend`
+- `RESEND_API_KEY` (secret serveur uniquement)
+- `AEM_FROM` (domaine vérifié, pas resend.dev pour les vrais candidats)
+- `AEM_RECIPIENT=aemseve@gmail.com`
+- `AEM_ORIGIN` / `AEM_ADMIN_URL` (ex. demo Render)
+- `AEM_EMAIL_TIMEOUT_MS=15000` (défaut)
+- `AEM_MAIL_ATTACHMENTS=0` (défaut) ; conserver `AEM_CANDIDATE_MAIL` actuel
+
+Variables SMTP (toujours supportées) : `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`.
+
+États `adminNotify` : `pending` → `sending` → `sent` | `failed` | `uncertain` | `skipped`.
+- **sent** = accepté pour envoi par le fournisseur (pas « reçu / lu » dans Gmail).
+- **uncertain** = timeout, 5xx, coupure, ou acceptation non confirmée localement — ne pas renvoyer à l’aveugle.
+- Retry Admin manuel pour `failed` / `uncertain` / `pending` / `skipped` (pas de rattrapage massif).
+- Idempotence Resend : clé stable `aem-admin-notify/<dossierId>`, fenêtre 24 h ; ne jamais changer la clé pour contourner un conflit.
+
+DNS domaine : https://resend.com/docs/add-a-domain  
+API : https://resend.com/docs/api-reference/emails/send-email  
+
+Le transport HTTPS ne résout **pas** la persistance du filesystem Render Free
+(dossiers/reçus éphémères sans disque). Migration Gandi / disque persistant :
+hors de ce lot.
+
+Copier `.env.example` vers `.env` localement, ou renseigner les variables dans le
+panneau privé de l’hébergement. Ne jamais mettre de secrets dans les pages ou le
+JavaScript public. `npm run check:mail` vérifie la config (et SMTP verify si SMTP) ;
+il n’envoie pas de mail. `npm run test:mail` confirme l’acceptation HTTP du dossier,
+pas l’envoi SMTP/Resend.
 
 ## Espace admin et exploitation
 
@@ -445,18 +476,19 @@ L’application actuelle peut y fonctionner sans réécriture du backend :
 3. Utiliser une version Node prise en charge par le projet (22 ou plus récente).
 4. Définir HOST=0.0.0.0 ; conserver le PORT attribué par Render.
 5. Définir AEM_ORIGIN à l’origine HTTPS attribuée au service et AEM_BASE_PATH vide.
-6. Renseigner les variables SMTP et AEM_FROM dans le panneau de secrets.
+6. Renseigner soit Resend (`AEM_EMAIL_PROVIDER=resend`, `RESEND_API_KEY`, `AEM_FROM`
+   sur domaine vérifié), soit SMTP (`SMTP_*`, `AEM_FROM`) dans le panneau de secrets.
 7. Monter un disque persistant privé, par exemple /var/data, et définir
    AEM_RECEIPT_DIR=/var/data/aem-receipts. Garder une seule instance.
 8. Tester /ants.html et /permis.html depuis cette URL avec des données fictives.
-9. Vérifier dans la boîte destinataire l’audit complet, les noms et les octets des
+9. Vérifier dans la boîte destinataire l’audit / la notification et, si activé, les
    pièces jointes. Contrôler également les indésirables.
 
-L’offre gratuite Render bloque les ports SMTP 25/465/587 ; elle ne convient donc
-pas à ce test avec le transport actuel. Le service Node et le disque sont payants ;
-vérifier le tarif affiché avant de les créer.
-La limite du SMTP réel doit accepter le message complet : l’encodage des pièces
-augmente leur taille d’environ un tiers. Tester le cas proche de 17 Mo.
+L’offre gratuite Render bloque les ports SMTP 25/465/587 ; pour Render Free,
+utiliser **Resend en HTTPS** (`AEM_EMAIL_PROVIDER=resend`). Un service Node payant
+reste nécessaire pour un disque persistant. Vérifier le tarif affiché avant création.
+La limite du SMTP/Resend réel doit accepter le message complet : l’encodage des
+pièces augmente leur taille d’environ un tiers. Tester le cas proche de 17 Mo.
 
 Sources vérifiées :
 - https://render.com/docs/web-services

@@ -108,6 +108,44 @@
 .admin-upload input { position:absolute; width:1px; height:1px; opacity:0; }
 .admin-upload:has(input:focus-visible) { outline:3px solid var(--ambre); outline-offset:2px; }
 .admin-upload::before { content:"+"; display:grid; place-items:center; width:22px; height:22px; border-radius:50%; background:var(--horizon); color:var(--nuit); font:800 16px/1 var(--display); }
+
+/* Zone de dépôt comptoir : surface large = surface active (pas un petit label). */
+.admin-dropzone {
+ display:flex; flex-direction:column; align-items:stretch; gap:8px;
+ margin-top:12px; padding:20px 18px; min-height:120px;
+ border:2px dashed #9AA8BD; border-radius:14px; background:#F7F9FC;
+ color:var(--globe-fonce); box-sizing:border-box;
+}
+.admin-dropzone.is-dragover {
+ border-color:var(--ambre); background:#FFF8E8; box-shadow:inset 0 0 0 2px rgba(232,168,56,.35);
+}
+.admin-dropzone.is-busy { opacity:.72; pointer-events:none; }
+.admin-dropzone-hint {
+ margin:0; font:700 16px/1.35 var(--display); color:var(--nuit); text-align:center;
+}
+.admin-dropzone-formats {
+ margin:0; font-size:12px; line-height:1.4; color:var(--sourdine); text-align:center;
+}
+.admin-dropzone-status {
+ margin:0; font-size:13px; line-height:1.4; color:var(--globe-fonce); text-align:center;
+}
+.admin-upload-pick {
+ display:inline-flex; align-self:center; align-items:center; justify-content:center; gap:8px;
+ margin-top:4px; padding:10px 16px; border-radius:10px; border:1px solid var(--nuit);
+ background:#fff; color:var(--nuit); font-size:14px; font-weight:700; cursor:pointer;
+ position:relative;
+}
+.admin-upload-pick:hover { background:#F4F6FA; }
+.admin-upload-pick input {
+ position:absolute; width:1px; height:1px; opacity:0; overflow:hidden; clip:rect(0 0 0 0);
+}
+.admin-upload-pick:has(input:focus-visible) { outline:3px solid var(--ambre); outline-offset:2px; }
+.admin-dropzone .field-error { margin-top:4px; }
+
+@media (max-width:720px){
+ .admin-dropzone { min-height:100px; padding:16px 14px; }
+ .admin-dropzone-hint { font-size:15px; }
+}
 .admin-audit-box { margin:16px 0 0; }
 .admin-audit-box summary { cursor:pointer; color:var(--nuit); font-weight:700; }
 .admin-audit { margin:10px 0 6px; padding:14px; border-radius:10px; background:#F8FAFD; border:1px solid var(--ligne); white-space:pre-wrap; font-size:13px; line-height:1.55; overflow:auto; max-height:320px; }

@@ -35,6 +35,18 @@ services:
         value: "0"
       - key: AEM_RETENTION_DAYS
         value: "60"
+      # Messagerie : sur Render Free, configurer Resend (HTTPS), pas SMTP.
+      # AEM_EMAIL_PROVIDER=resend + RESEND_API_KEY + AEM_FROM (domaine vérifié) + AEM_RECIPIENT
+      - key: AEM_EMAIL_PROVIDER
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: AEM_FROM
+        sync: false
+      - key: AEM_RECIPIENT
+        sync: false
+      - key: AEM_ADMIN_URL
+        sync: false
       # Saisir manuellement : demo:demo:responsable
       - key: AEM_ADMIN_ACCOUNTS
         sync: false

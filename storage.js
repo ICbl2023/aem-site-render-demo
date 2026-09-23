@@ -216,6 +216,30 @@ export function createStorage(dataDir,{files,blobs,blobScope="dossiers"}={}){
   if(typeof patch.adminNote==="string" && patch.adminNote.slice(0,4000)!==(meta.adminNote||"")){meta.adminNote=patch.adminNote.slice(0,4000);meta.history.push(historyEntry(by,"note",meta.adminNote?"Note interne mise à jour":"Note interne effacée"));}
   if(["sent","failed","skipped"].includes(patch.candidateMail))meta.candidateMail=patch.candidateMail;
   if(["pending","sending","sent","failed","uncertain","skipped"].includes(patch.adminNotify))meta.adminNotify=patch.adminNotify;
+  // Métadonnées techniques de notification (non saisissables via patch Admin public).
+  if(typeof patch.adminNotifyOpId==="string")meta.adminNotifyOpId=patch.adminNotifyOpId.slice(0,80);
+  if(typeof patch.adminNotifyProvider==="string")meta.adminNotifyProvider=patch.adminNotifyProvider.slice(0,32);
+  if(typeof patch.adminNotifyProviderId==="string")meta.adminNotifyProviderId=patch.adminNotifyProviderId.slice(0,120);
+  if(typeof patch.adminNotifyIdempotencyKey==="string")meta.adminNotifyIdempotencyKey=patch.adminNotifyIdempotencyKey.slice(0,256);
+  if(typeof patch.adminNotifyFingerprint==="string")meta.adminNotifyFingerprint=patch.adminNotifyFingerprint.slice(0,128);
+  if(typeof patch.adminNotifySentAt==="string")meta.adminNotifySentAt=patch.adminNotifySentAt.slice(0,40);
+  if(typeof patch.adminNotifyLastAttemptAt==="string")meta.adminNotifyLastAttemptAt=patch.adminNotifyLastAttemptAt.slice(0,40);
+  if(patch.adminNotifyEnvelope && typeof patch.adminNotifyEnvelope==="object" && !Array.isArray(patch.adminNotifyEnvelope)){
+   const env=patch.adminNotifyEnvelope;
+   meta.adminNotifyEnvelope={
+    subject:String(env.subject||"").slice(0,500),
+    text:String(env.text||"").slice(0,200000),
+    html:env.html==null?"":String(env.html).slice(0,200000),
+    from:String(env.from||"").slice(0,320),
+    to:String(env.to||"").slice(0,320),
+    replyTo:env.replyTo && typeof env.replyTo==="object"
+     ?{address:String(env.replyTo.address||"").slice(0,320),name:String(env.replyTo.name||"").slice(0,200)}
+     :{address:String(env.replyTo||"").slice(0,320),name:""},
+    deferredLabels:Array.isArray(env.deferredLabels)?env.deferredLabels.map(s=>String(s).slice(0,200)).slice(0,40):[],
+    attachmentsEnabled:Boolean(env.attachmentsEnabled),
+    attachmentNames:Array.isArray(env.attachmentNames)?env.attachmentNames.map(s=>String(s).slice(0,200)).slice(0,60):[]
+   };
+  }
   if(typeof patch.assignedTo==="string"){
    const who=patch.assignedTo.trim().slice(0,64);
    if(who!==(meta.assignedTo||"")){meta.assignedTo=who;meta.history.push(historyEntry(by,"assign",who?"Suivi par "+who:"Suivi retiré"));}

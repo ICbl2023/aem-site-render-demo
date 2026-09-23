@@ -319,32 +319,70 @@ function checklist(dossier,documents){
  row.append(list);
  }
  if(canWrite()){
- const add=el("label","admin-upload");
- const input=el("input");input.type="file";input.multiple=true;input.accept=ACCEPT;input.setAttribute("aria-label","Ajouter une pièce reçue au comptoir pour "+doc.label);
- const text=el("span","",files.length?"Ajouter un autre fichier reçu au comptoir":"Ajouter une pièce reçue au comptoir (ou glisser-déposer)");
+ const zone=el("div","admin-dropzone");
+ zone.setAttribute("role","region");
+ zone.setAttribute("aria-label","Dépôt de fichiers pour "+doc.label);
+ const hint=el("p","admin-dropzone-hint","Glissez-déposez vos fichiers ici");
+ const formats=el("p","admin-dropzone-formats","Formats acceptés : PDF, JPG, PNG, WEBP, HEIC — même contrôles que le sélecteur classique.");
+ const pick=el("label","admin-upload-pick");
+ const input=el("input");input.type="file";input.multiple=true;input.accept=ACCEPT;
+ const inputId="admin-file-"+doc.key+"-"+Math.random().toString(36).slice(2,9);
+ input.id=inputId;pick.htmlFor=inputId;
+ input.setAttribute("aria-label","Ajouter une pièce reçue au comptoir pour "+doc.label);
+ const pickText=el("span","","Parcourir et sélectionner un fichier");
+ pick.append(input,pickText);
+ const status=el("p","admin-dropzone-status");status.hidden=true;
  const error=el("p","field-error");error.hidden=true;error.setAttribute("role","alert");
- let uploading=false;
- const idleLabel=files.length?"Ajouter un autre fichier reçu au comptoir (ou glisser-déposer)":"Ajouter une pièce reçue au comptoir (ou glisser-déposer PDF, JPG, PNG, WEBP, HEIC)";
- text.textContent=idleLabel;
+ let uploading=false,dragDepth=0;
+ const idleStatus=files.length?"Vous pouvez ajouter un autre fichier pour cette pièce.":"Déposez un ou plusieurs fichiers pour cette pièce, ou utilisez Parcourir.";
+ status.textContent=idleStatus;status.hidden=false;
+ const clearDrag=()=>{dragDepth=0;zone.classList.remove("is-dragover");};
+ const isFileDrag=dt=>{
+  if(!dt)return false;
+  const types=dt.types?Array.from(dt.types):[];
+  if(types.includes("Files") || types.includes("application/x-moz-file"))return true;
+  if(dt.items && dt.items.length)return Array.from(dt.items).some(it=>it.kind==="file");
+  return false;
+ };
  const sendFiles=async fileList=>{
   if(uploading)return;
   const list=fileList?Array.from(fileList):[];
   if(!list.length){showError(error,"Aucun fichier exploitable déposé. Formats acceptés : PDF, JPG, PNG, WEBP, HEIC.");return;}
   const body=new FormData();body.append("key",doc.key);for(const f of list)body.append("files",f,f.name);
-  uploading=true;input.disabled=true;text.textContent="Envoi en cours…";error.hidden=true;add.classList.remove("is-dragover");
+  uploading=true;input.disabled=true;clearDrag();
+  status.hidden=false;status.textContent="Envoi en cours…";error.hidden=true;zone.classList.add("is-busy");
   try{await api("dossiers/"+dossier.id+"/files",{method:"POST",body});}
-  catch(e){showError(error,e.message);uploading=false;input.disabled=false;text.textContent=idleLabel;return;}
+  catch(e){showError(error,e.message);uploading=false;input.disabled=false;input.value="";status.textContent=idleStatus;zone.classList.remove("is-busy");return;}
   await loadStats();await openDossier(dossier.id,refreshWarning);
  };
  input.addEventListener("change",async()=>{await sendFiles(input.files);input.value="";});
- add.addEventListener("dragenter",e=>{e.preventDefault();e.stopPropagation();if(!uploading)add.classList.add("is-dragover");});
- add.addEventListener("dragover",e=>{e.preventDefault();e.stopPropagation();e.dataTransfer.dropEffect="copy";if(!uploading)add.classList.add("is-dragover");});
- add.addEventListener("dragleave",e=>{if(!add.contains(e.relatedTarget))add.classList.remove("is-dragover");});
- add.addEventListener("drop",async e=>{
-  e.preventDefault();e.stopPropagation();add.classList.remove("is-dragover");
+ zone.addEventListener("dragenter",e=>{
+  if(!isFileDrag(e.dataTransfer))return;
+  e.preventDefault();e.stopPropagation();
+  dragDepth++;
+  if(!uploading)zone.classList.add("is-dragover");
+ });
+ zone.addEventListener("dragover",e=>{
+  if(!isFileDrag(e.dataTransfer))return;
+  e.preventDefault();e.stopPropagation();
+  try{e.dataTransfer.dropEffect="copy";}catch{}
+  if(!uploading)zone.classList.add("is-dragover");
+ });
+ zone.addEventListener("dragleave",e=>{
+  if(!isFileDrag(e.dataTransfer) && dragDepth===0)return;
+  e.preventDefault();e.stopPropagation();
+  // Compteur de profondeur : relatedTarget est souvent null avec un glissement OS.
+  dragDepth=Math.max(0,dragDepth-1);
+  if(dragDepth===0)zone.classList.remove("is-dragover");
+ });
+ zone.addEventListener("drop",async e=>{
+  e.preventDefault();e.stopPropagation();
+  clearDrag();
+  if(uploading)return;
   await sendFiles(e.dataTransfer?.files);
  });
- add.append(input,text);row.append(add,error);
+ zone.addEventListener("dragend",()=>clearDrag());
+ zone.append(hint,formats,pick,status);row.append(zone,error);
  }
  wrap.append(row);
  }
@@ -397,13 +435,20 @@ function deleteBlock(dossier){
 
 function notifyBlock(dossier){
  const state=dossier.adminNotify||"";
- if(!["failed","uncertain","pending"].includes(state))return null;
+ if(!["failed","uncertain","pending","skipped"].includes(state))return null;
  const block=el("section","admin-notify");
  block.append(el("h3","","Notification « nouveau dossier »"));
- block.append(el("p","","État : "+(adminNotifyStates[state]||adminNotifyLabels[state]||state)+". Le dossier est bien enregistré. Vous pouvez renvoyer la notification à l’adresse admin configurée."));
+ block.append(el("p","","État : "+(adminNotifyStates[state]||adminNotifyLabels[state]||state)+". Le dossier est bien enregistré."));
+ if(state==="uncertain"){
+  block.append(el("p","","Résultat incertain : le fournisseur a peut‑être déjà accepté l’envoi. Vérifiez la boîte admin avant de renvoyer, pour éviter un doublon."));
+ }else if(state==="skipped"){
+  block.append(el("p","","La messagerie n’était pas configurée au moment de la soumission. Vous pouvez tenter l’envoi maintenant si elle l’est."));
+ }else{
+  block.append(el("p","","Vous pouvez renvoyer la notification à l’adresse admin configurée."));
+ }
  const error=el("p","field-error");error.hidden=true;error.setAttribute("role","alert");
  const ok=el("p","validation-hint");ok.hidden=true;
- const button=el("button","next-button","Renvoyer la notification");button.type="button";
+ const button=el("button","next-button",state==="uncertain"?"Retenter avec prudence":"Renvoyer la notification");button.type="button";
  button.addEventListener("click",async()=>{
   error.hidden=true;ok.hidden=true;button.disabled=true;
   try{await api("dossiers/"+dossier.id+"/notification/retry",{method:"POST",body:"{}"});}
